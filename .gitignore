@@ -6,3 +6,4 @@ out/
 .env.*.local
 *.log
 .DS_Store
+infra/parametres/prod-params.json
