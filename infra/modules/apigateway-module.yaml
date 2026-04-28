@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo API Gateway - Crea el API REST que recibe los datos del
+  formulario del sitio web y los envia a la funcion Lambda.
+  Incluye:
+    - Recurso /contact con metodo POST integrado con Lambda (proxy)
+    - Metodo OPTIONS en /contact para soportar CORS desde el navegador
+    - Stage de despliegue con logging habilitado
+    - Permiso para que API Gateway invoque la Lambda
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Ambiente de despliegue
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue"
+
+  # ARN de la Lambda (viene del output de LambdaStack)
+  LambdaFunctionArn:
+    Type: String
+    Description: "ARN de la funcion Lambda que procesa el formulario"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # REST API - Punto de entrada del API
+  # ------------------------------------------------------------
+  WebsiteRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+
+      # Nombre descriptivo del API
+      Name: !Sub "website-contact-api-${Environment}"
+
+      # Descripcion del proposito del API
+      Description: "API REST para recibir y procesar los datos del formulario de contacto"
+
+      # ---- TIPO DE ENDPOINT ----
+      # REGIONAL: El API se despliega en la region actual
+      # Usamos REGIONAL porque CloudFront ya maneja la distribucion global del sitio
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: ContactFormAPI
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # RECURSO /contact - Ruta del endpoint del formulario
+  # ------------------------------------------------------------
+  ContactResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebsiteRestApi                 # A que API pertenece este recurso
+      ParentId: !GetAtt WebsiteRestApi.RootResourceId # El padre es la raiz "/"
+      PathPart: contact                              # Ruta: /contact
+
+  # ------------------------------------------------------------
+  # METODO POST /contact - Recibe los datos del formulario
+  # Usa integracion Lambda Proxy: API Gateway pasa el evento completo
+  # a la Lambda tal como llega, sin transformaciones
+  # ------------------------------------------------------------
+  ContactPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:         !Ref WebsiteRestApi         # API al que pertenece
+      ResourceId:        !Ref ContactResource        # Recurso /contact
+      HttpMethod:        POST                        # Metodo HTTP
+      AuthorizationType: NONE                        # Sin autenticacion (publico)
+
+      # ---- INTEGRACION CON LAMBDA ----
+      Integration:
+        Type:                  AWS_PROXY             # Proxy: pasa el evento completo a Lambda
+        IntegrationHttpMethod: POST                  # API Gateway siempre usa POST para invocar Lambda
+        # URI de invocacion de la Lambda (formato estandar de API Gateway)
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunctionArn}/invocations"
+
+      # ---- RESPUESTAS DEL METODO ----
+      MethodResponses:
+        - StatusCode: 200                            # Respuesta exitosa
+          ResponseParameters:
+            # Permite el header CORS en la respuesta
+            method.response.header.Access-Control-Allow-Origin: true
+
+  # ------------------------------------------------------------
+  # METODO OPTIONS /contact - Soporte CORS (preflight request)
+  # Los navegadores envian una solicitud OPTIONS antes del POST
+  # para verificar si el servidor acepta solicitudes CORS
+  # Sin este metodo el formulario NO funcionara desde el navegador
+  # ------------------------------------------------------------
+  ContactOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:         !Ref WebsiteRestApi         # API al que pertenece
+      ResourceId:        !Ref ContactResource        # Recurso /contact
+      HttpMethod:        OPTIONS                     # Metodo HTTP OPTIONS (preflight)
+      AuthorizationType: NONE                        # Sin autenticacion
+
+      # ---- INTEGRACION MOCK ----
+      # No llama a ninguna Lambda, responde directamente con los headers CORS
+      Integration:
+        Type: MOCK                                   # Respuesta simulada sin backend
+        PassthroughBehavior: WHEN_NO_MATCH
+        # Mapea el status 200 para la solicitud mock
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        # Define los headers CORS que se retornan en la respuesta
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              # Headers que el navegador necesita para aprobar CORS
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"  # Metodos permitidos
+              method.response.header.Access-Control-Allow-Origin:  "'*'"             # Acepta cualquier origen
+            ResponseTemplates:
+              application/json: ''                  # Body vacio en la respuesta OPTIONS
+
+      # ---- RESPUESTAS DEL METODO OPTIONS ----
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin:  true
+
+  # ------------------------------------------------------------
+  # PERMISO LAMBDA - Autoriza a API Gateway a invocar la Lambda
+  # Sin este permiso API Gateway recibira un error 403 al llamar Lambda
+  # ------------------------------------------------------------
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunctionArn           # Lambda que se autoriza
+      Action:       lambda:InvokeFunction            # Accion permitida
+      Principal:    apigateway.amazonaws.com         # Quien recibe el permiso
+
+      # SourceArn limita el permiso a SOLO este API y metodo POST en /contact
+      # Esto evita que otros APIs puedan invocar esta Lambda
+      SourceArn: !Sub "arn:aws:apigateway:${AWS::Region}::/restapis/${WebsiteRestApi}/*/POST/contact"
+
+  # ------------------------------------------------------------
+  # DEPLOYMENT - Despliega el API (snapshot de la configuracion)
+  # Se debe crear un nuevo deployment cada vez que se modifique el API
+  # DependsOn asegura que los metodos existan antes de desplegarse
+  # ------------------------------------------------------------
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ContactPostMethod                            # Espera que el metodo POST este listo
+      - ContactOptionsMethod                         # Espera que el metodo OPTIONS este listo
+    Properties:
+      RestApiId:   !Ref WebsiteRestApi
+      Description: !Sub "Deployment del API - Ambiente ${Environment}"
+
+  # ------------------------------------------------------------
+  # STAGE - Entorno de despliegue del API
+  # Define la URL final y configuraciones de cada ambiente
+  # URL resultante: https://{api-id}.execute-api.{region}.amazonaws.com/{stage}/contact
+  # ------------------------------------------------------------
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId:    !Ref WebsiteRestApi
+      DeploymentId: !Ref ApiDeployment               # Deployment al que apunta este stage
+      StageName:    !Ref Environment                 # Nombre del stage (prod)
+      Description: !Sub "Stage ${Environment} del API de contacto"
+
+      # ---- CONFIGURACION DE LOGGING ----
+      # Registra las solicitudes en CloudWatch para debugging
+      MethodSettings:
+        - ResourcePath: "/*"                         # Aplica a todos los recursos
+          HttpMethod:   "*"                          # Aplica a todos los metodos
+          LoggingLevel: INFO                         # Nivel de log: INFO (ERROR para menos verbosidad)
+          DataTraceEnabled: false                    # No registra el body completo (privacidad)
+          MetricsEnabled:   true                     # Habilita metricas de CloudWatch
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # CLOUDWATCH LOG GROUP - Logs del API Gateway
+  # Se crea explicitamente para controlar la retencion
+  # ------------------------------------------------------------
+  ApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/apigateway/website-contact-api-${Environment}"
+      RetentionInDays: 30                            # Retiene los logs por 30 dias
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# ==============================================================
+Outputs:
+
+  # ID del API (util para el pipeline CI/CD y para crear nuevos deployments)
+  ApiId:
+    Description: "ID del API Gateway REST"
+    Value: !Ref WebsiteRestApi
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiId"
+
+  # URL completa del endpoint del formulario
+  # Esta es la URL que debes usar en el frontend para hacer el POST
+  ApiEndpoint:
+    Description: "URL del endpoint del formulario de contacto"
+    Value: !Sub "https://${WebsiteRestApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/contact"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"

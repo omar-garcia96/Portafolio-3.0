@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo Lambda - Crea la funcion que procesa los datos del formulario.
+  Flujo de la funcion:
+    1. Recibe el evento de API Gateway con los datos del formulario
+    2. Genera un ID unico y un timestamp para el registro
+    3. Guarda los datos en DynamoDB
+    4. Si el guardado fue exitoso, publica un mensaje en SNS
+    5. Retorna una respuesta HTTP con el resultado
+  NOTA: El codigo esta embebido en el template (ZipFile).
+  Para mayor complejidad considera usar un bucket S3 con un zip.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Ambiente de despliegue
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue"
+
+  # Nombre de la tabla DynamoDB (viene del output de DynamoDBStack)
+  DynamoDBTableName:
+    Type: String
+    Description: "Nombre de la tabla DynamoDB donde se guardan los datos"
+
+  # ARN de la tabla DynamoDB (necesario para la politica IAM)
+  DynamoDBTableArn:
+    Type: String
+    Description: "ARN de la tabla DynamoDB para configurar permisos IAM"
+
+  # ARN del topic SNS (viene del output de SNSStack)
+  SNSTopicArn:
+    Type: String
+    Description: "ARN del topic SNS para enviar notificaciones"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # IAM ROLE - Rol de ejecucion de la Lambda
+  # Define exactamente que servicios puede usar la funcion (minimo privilegio)
+  # ------------------------------------------------------------
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+
+      # Nombre descriptivo del rol
+      RoleName: !Sub "website-lambda-execution-role-${Environment}"
+
+      # ---- TRUST POLICY ----
+      # Permite que el servicio Lambda asuma este rol
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com          # Solo Lambda puede asumir este rol
+            Action: sts:AssumeRole
+
+      # ---- POLITICAS GESTIONADAS POR AWS ----
+      # AWSLambdaBasicExecutionRole: permite a Lambda escribir logs en CloudWatch
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+      # ---- POLITICAS EN LINEA (permisos minimos y especificos) ----
+      Policies:
+
+        # Permiso para escribir en la tabla DynamoDB especifica (no en todas las tablas)
+        - PolicyName: DynamoDBWritePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem                 # Solo permite insertar, no leer ni eliminar
+                Resource: !Ref DynamoDBTableArn      # Solo en esta tabla especifica
+
+        # Permiso para publicar en el topic SNS especifico (no en todos los topics)
+        - PolicyName: SNSPublishPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish                      # Solo permite publicar mensajes
+                Resource: !Ref SNSTopicArn           # Solo en este topic especifico
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # LAMBDA FUNCTION - Procesador del formulario
+  # ------------------------------------------------------------
+  FormProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+
+      # Nombre descriptivo de la funcion
+      FunctionName: !Sub "website-form-processor-${Environment}"
+
+      # Runtime: Python 3.12 (version LTS reciente)
+      Runtime: python3.12
+
+      # Handler: nombre_archivo.nombre_funcion
+      Handler: index.lambda_handler
+
+      # Rol IAM que usa la funcion para acceder a AWS
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+      # Tiempo maximo de ejecucion en segundos (30s es suficiente para DynamoDB + SNS)
+      Timeout: 30
+
+      # Memoria asignada en MB (128MB es suficiente para esta funcion simple)
+      MemorySize: 128
+
+      # ---- VARIABLES DE ENTORNO ----
+      # Permite cambiar la configuracion sin modificar el codigo
+      Environment:
+        Variables:
+          DYNAMODB_TABLE: !Ref DynamoDBTableName     # Nombre de la tabla DynamoDB
+          SNS_TOPIC_ARN:  !Ref SNSTopicArn           # ARN del topic SNS
+
+      # ---- CODIGO DE LA FUNCION (embebido en el template) ----
+      # ZipFile permite escribir el codigo directamente en el template
+      # Limite: 4096 caracteres. Para funciones mas grandes usar S3.
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import uuid
+          from datetime import datetime, timezone
+
+          # Inicializa los clientes fuera del handler para reutilizarlos entre invocaciones (warm start)
+          dynamodb = boto3.resource('dynamodb')
+          sns_client = boto3.client('sns')
+
+          def lambda_handler(event, context):
+              # Obtiene referencias a los recursos desde las variables de entorno
+              table     = dynamodb.Table(os.environ['DYNAMODB_TABLE'])
+              topic_arn = os.environ['SNS_TOPIC_ARN']
+
+              try:
+                  # Parsea el body del request enviado por API Gateway
+                  # Si el body esta vacio, usa un diccionario vacio por defecto
+                  body = json.loads(event.get('body') or '{}')
+
+                  # Construye el item a guardar en DynamoDB
+                  item = {
+                      'id':        str(uuid.uuid4()),                    # ID unico para cada envio
+                      'timestamp': datetime.now(timezone.utc).isoformat(), # Fecha/hora en UTC (ISO 8601)
+                  }
+                  item.update(body)  # Agrega todos los campos del formulario al item
+
+                  # Guarda el item en DynamoDB
+                  table.put_item(Item=item)
+
+                  # Si el guardado fue exitoso, publica el item completo en SNS
+                  sns_client.publish(
+                      TopicArn = topic_arn,
+                      Subject  = 'Nuevo mensaje recibido desde el formulario web',
+                      Message  = json.dumps(item, indent=2, ensure_ascii=False)
+                  )
+
+                  # Retorna respuesta exitosa con headers CORS
+                  return {
+                      'statusCode': 200,
+                      'headers': {
+                          'Access-Control-Allow-Origin':  '*',
+                          'Access-Control-Allow-Headers': 'Content-Type',
+                          'Content-Type':                 'application/json'
+                      },
+                      'body': json.dumps({
+                          'message': 'Datos guardados exitosamente',
+                          'id':      item['id']
+                      })
+                  }
+
+              except Exception as e:
+                  # Registra el error en CloudWatch Logs para debugging
+                  print(f"ERROR: {str(e)}")
+
+                  # Retorna respuesta de error con headers CORS
+                  return {
+                      'statusCode': 500,
+                      'headers': {
+                          'Access-Control-Allow-Origin': '*',
+                          'Content-Type':                'application/json'
+                      },
+                      'body': json.dumps({
+                          'message': 'Error al procesar la solicitud. Intenta nuevamente.'
+                      })
+                  }
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: FormProcessor
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # CLOUDWATCH LOG GROUP - Logs de la Lambda
+  # Se crea explicitamente para controlar la retencion de logs
+  # Si no se crea, AWS lo genera automaticamente sin limite de retencion
+  # ------------------------------------------------------------
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      # El nombre DEBE seguir este patron para que Lambda escriba en este grupo
+      LogGroupName: !Sub "/aws/lambda/website-form-processor-${Environment}"
+
+      # Retiene los logs por 30 dias para ahorrar costos en CloudWatch
+      RetentionInDays: 30
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# Valores que necesita el modulo de API Gateway
+# ==============================================================
+Outputs:
+
+  # ARN de la funcion (API Gateway necesita el ARN para la integracion y los permisos)
+  FunctionArn:
+    Description: "ARN de la funcion Lambda"
+    Value: !GetAtt FormProcessorFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-FunctionArn"
+
+  # Nombre de la funcion (util para el pipeline CI/CD al actualizar el codigo)
+  FunctionName:
+    Description: "Nombre de la funcion Lambda"
+    Value: !Ref FormProcessorFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-FunctionName"

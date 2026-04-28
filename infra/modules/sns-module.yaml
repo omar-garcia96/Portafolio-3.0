@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo SNS - Crea el topic de notificaciones que se dispara
+  cuando la Lambda almacena exitosamente los datos del formulario.
+  Envia un email con la informacion guardada al correo configurado.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Ambiente de despliegue
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue"
+
+  # Correo electronico que recibira las notificaciones del formulario
+  # IMPORTANTE: AWS enviara un email de confirmacion a esta direccion
+  # El suscriptor DEBE confirmar el email antes de recibir notificaciones
+  NotificationEmail:
+    Type: String
+    Description: "Email para recibir notificaciones cuando se llene el formulario"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # SNS TOPIC - Canal de notificaciones del formulario
+  # ------------------------------------------------------------
+  FormNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+
+      # Nombre del topic combinando proposito y ambiente
+      TopicName: !Sub "website-form-notifications-${Environment}"
+
+      # Nombre visible del remitente en los emails que se envien
+      DisplayName: "Notificacion Formulario Web"
+
+      # ---- SUSCRIPCION POR EMAIL ----
+      # Agrega el email como suscriptor al momento de crear el topic
+      # AWS enviara automaticamente un email de confirmacion
+      Subscription:
+        - Protocol: email                          # Protocolo de entrega: email
+          Endpoint: !Ref NotificationEmail          # Direccion de email que recibe las notificaciones
+
+      # ---- CIFRADO DEL TOPIC ----
+      # Cifra los mensajes en transito usando KMS gestionado por AWS
+      KmsMasterKeyId: alias/aws/sns                # Clave KMS gestionada por AWS para SNS
+
+      # ---- TAGS DE IDENTIFICACION ----
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: FormNotifications
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# Valores que necesita la Lambda para publicar mensajes en el topic
+# ==============================================================
+Outputs:
+
+  # ARN del topic (la Lambda lo necesita para llamar sns:Publish)
+  TopicArn:
+    Description: "ARN del topic SNS"
+    Value: !Ref FormNotificationTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-TopicArn"
+
+  # Nombre del topic (util para referencia y debugging)
+  TopicName:
+    Description: "Nombre del topic SNS"
+    Value: !GetAtt FormNotificationTopic.TopicName
+    Export:
+      Name: !Sub "${AWS::StackName}-TopicName"

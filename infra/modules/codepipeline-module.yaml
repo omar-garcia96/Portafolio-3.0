@@ -1,0 +1,259 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo CodePipeline - Crea el pipeline de CI/CD que automatiza
+  el despliegue del sitio web cada vez que hay un push en GitHub.
+  El pipeline tiene 3 etapas:
+    Stage 1 - Source:  Obtiene el codigo fuente desde GitHub
+                       usando una conexion CodeStar.
+    Stage 2 - Build:   Compila el frontend y empaqueta la Lambda
+                       usando el BuildProject de CodeBuild.
+    Stage 3 - Deploy:  Despliega en S3, invalida CloudFront
+                       y actualiza la Lambda usando el DeployProject.
+  PREREQUISITO: Debes crear manualmente una conexion CodeStar
+  a GitHub en la consola de AWS antes de desplegar este modulo.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Ambiente de despliegue
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue"
+
+  # Propietario del repositorio en GitHub (usuario u organizacion)
+  GitHubOwner:
+    Type: String
+    Description: "Usuario u organizacion de GitHub (ej: miusuario)"
+
+  # Nombre del repositorio en GitHub
+  GitHubRepo:
+    Type: String
+    Description: "Nombre del repositorio en GitHub (ej: mi-sitio-web)"
+
+  # Rama de GitHub que dispara el pipeline
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: "Rama de GitHub que dispara el pipeline (ej: main)"
+
+  # ARN de la conexion CodeStar a GitHub
+  # IMPORTANTE: Debes crear esta conexion manualmente en:
+  # AWS Console > Developer Tools > Connections > Create connection > GitHub
+  # Luego copia el ARN aqui
+  CodeStarConnectionArn:
+    Type: String
+    Description: "ARN de la conexion CodeStar a GitHub (creada manualmente en la consola)"
+
+  # Nombre del proyecto CodeBuild de build (viene del output de CodeBuildStack)
+  BuildProjectName:
+    Type: String
+    Description: "Nombre del proyecto CodeBuild de build"
+
+  # Nombre del proyecto CodeBuild de deploy (viene del output de CodeBuildStack)
+  DeployProjectName:
+    Type: String
+    Description: "Nombre del proyecto CodeBuild de deploy"
+
+  # Nombre del bucket de artefactos (viene del output de CodeBuildStack)
+  ArtifactsBucketName:
+    Type: String
+    Description: "Nombre del bucket S3 para artefactos del pipeline"
+
+  # ARN del bucket de artefactos (viene del output de CodeBuildStack)
+  ArtifactsBucketArn:
+    Type: String
+    Description: "ARN del bucket S3 de artefactos del pipeline"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # IAM ROLE PARA CODEPIPELINE
+  # Permisos que necesita el pipeline para orquestar los servicios
+  # ------------------------------------------------------------
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+
+      RoleName: !Sub "website-codepipeline-role-${Environment}"
+
+      # ---- TRUST POLICY ----
+      # Solo el servicio CodePipeline puede asumir este rol
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+
+        # Permiso para usar la conexion CodeStar y obtener el codigo de GitHub
+        - PolicyName: CodeStarConnectionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection   # Usa la conexion para leer el repositorio
+                Resource: !Ref CodeStarConnectionArn     # Solo esta conexion especifica
+
+        # Permiso para leer y escribir artefactos en el bucket S3
+        - PolicyName: ArtifactsBucketPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+                Resource:
+                  - !Ref ArtifactsBucketArn              # El bucket en si
+                  - !Sub "${ArtifactsBucketArn}/*"       # Los objetos dentro del bucket
+
+        # Permiso para iniciar los proyectos de CodeBuild (build y deploy)
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds             # Consulta el estado de los builds
+                  - codebuild:StartBuild                 # Inicia un nuevo build
+                Resource:
+                  - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${BuildProjectName}"
+                  - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/${DeployProjectName}"
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # CODEPIPELINE - Pipeline principal de CI/CD
+  # Orquesta las 3 etapas: Source -> Build -> Deploy
+  # Se dispara automaticamente con cada push a la rama configurada
+  # ------------------------------------------------------------
+  WebsitePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+
+      Name: !Sub "website-pipeline-${Environment}"
+
+      # Rol IAM que usa el pipeline para acceder a los servicios
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+
+      # Bucket S3 donde se almacenan los artefactos entre etapas
+      ArtifactStore:
+        Type:     S3
+        Location: !Ref ArtifactsBucketName
+
+      # ---- ETAPAS DEL PIPELINE ----
+      Stages:
+
+        # ----------------------------------------------------------
+        # ETAPA 1: SOURCE
+        # Detecta cambios en GitHub y descarga el codigo fuente.
+        # Se dispara automaticamente con cada push a la rama configurada.
+        # El codigo descargado se guarda como artefacto "SourceArtifact".
+        # ----------------------------------------------------------
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              # Tipo de accion: Source de un repositorio con CodeStar connection
+              ActionTypeId:
+                Category: Source
+                Owner:    AWS
+                Provider: CodeStarSourceConnection      # Proveedor para GitHub/GitLab via CodeStar
+                Version:  '1'
+              # Configuracion de la conexion al repositorio
+              Configuration:
+                ConnectionArn:        !Ref CodeStarConnectionArn    # Conexion CodeStar a GitHub
+                FullRepositoryId:     !Sub "${GitHubOwner}/${GitHubRepo}" # usuario/repositorio
+                BranchName:           !Ref GitHubBranch             # Rama que dispara el pipeline
+                OutputArtifactFormat: CODE_ZIP                      # Descarga el codigo como zip
+                DetectChanges:        true                          # Detecta cambios automaticamente (webhook)
+              # El codigo fuente descargado se exporta como artefacto
+              OutputArtifacts:
+                - Name: SourceArtifact                              # Nombre del artefacto de salida
+
+        # ----------------------------------------------------------
+        # ETAPA 2: BUILD
+        # Toma el codigo fuente (SourceArtifact), lo compila y
+        # empaqueta. El resultado (archivos compilados + lambda zip)
+        # se exporta como artefacto "BuildArtifact".
+        # ----------------------------------------------------------
+        - Name: Build
+          Actions:
+            - Name: BuildAction
+              # Tipo de accion: Build usando CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner:    AWS
+                Provider: CodeBuild
+                Version:  '1'
+              Configuration:
+                ProjectName: !Ref BuildProjectName                  # Proyecto CodeBuild de build
+              # Recibe el codigo fuente del stage anterior
+              InputArtifacts:
+                - Name: SourceArtifact
+              # Exporta los archivos compilados mas el lambda zip
+              OutputArtifacts:
+                - Name: BuildArtifact                               # Nombre del artefacto de salida
+
+        # ----------------------------------------------------------
+        # ETAPA 3: DEPLOY
+        # Toma el artefacto compilado (BuildArtifact) y lo despliega:
+        #   - Sincroniza archivos con S3
+        #   - Invalida cache de CloudFront
+        #   - Actualiza codigo de la Lambda
+        # ----------------------------------------------------------
+        - Name: Deploy
+          Actions:
+            - Name: DeployAction
+              # Tipo de accion: Build usando CodeBuild (reutilizamos CodeBuild para el deploy)
+              ActionTypeId:
+                Category: Build
+                Owner:    AWS
+                Provider: CodeBuild
+                Version:  '1'
+              Configuration:
+                ProjectName: !Ref DeployProjectName                 # Proyecto CodeBuild de deploy
+              # Recibe los archivos compilados del stage anterior
+              InputArtifacts:
+                - Name: BuildArtifact
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: CICD
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# ==============================================================
+Outputs:
+
+  # Nombre del pipeline (referencia rapida)
+  PipelineName:
+    Description: "Nombre del pipeline de CI/CD"
+    Value: !Ref WebsitePipeline
+    Export:
+      Name: !Sub "${AWS::StackName}-PipelineName"
+
+  # URL del pipeline en la consola de AWS (acceso rapido para monitoreo)
+  PipelineUrl:
+    Description: "URL del pipeline en la consola de AWS"
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${WebsitePipeline}/view"
+    Export:
+      Name: !Sub "${AWS::StackName}-PipelineUrl"

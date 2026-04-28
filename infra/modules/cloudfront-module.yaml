@@ -1,0 +1,238 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo CloudFront - Crea la distribucion CDN para entregar el sitio web
+  con baja latencia a nivel global. Incluye:
+    - OAC (Origin Access Control): mecanismo moderno que permite a CloudFront
+      acceder de forma privada y segura al bucket S3.
+    - Politica del bucket S3: se gestiona aqui porque necesita el ID de la distribucion.
+    - Distribucion CloudFront con HTTPS, cache optimizado y paginas de error.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Dominio principal del sitio web
+  DomainName:
+    Type: String
+    Description: "Dominio principal (ej: midominio.com)"
+
+  # Subdominio www
+  WWWDomainName:
+    Type: String
+    Description: "Subdominio www (ej: www.midominio.com)"
+
+  # ARN del certificado SSL en ACM (DEBE estar en us-east-1)
+  CertificateArn:
+    Type: String
+    Description: "ARN del certificado SSL en ACM - debe estar en us-east-1"
+
+  # Nombre del bucket S3 (viene del output del modulo S3)
+  S3BucketName:
+    Type: String
+    Description: "Nombre del bucket S3 donde esta el sitio web"
+
+  # ARN del bucket S3 (viene del output del modulo S3)
+  S3BucketArn:
+    Type: String
+    Description: "ARN del bucket S3"
+
+  # Dominio regional del bucket S3 (viene del output del modulo S3)
+  S3BucketRegionalDomain:
+    Type: String
+    Description: "Dominio regional del bucket S3"
+
+  # Ambiente de despliegue
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue (dev, staging, prod)"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # OAC - Origin Access Control
+  # Mecanismo moderno (reemplaza al OAI) que permite a CloudFront
+  # autenticarse con S3 de forma segura sin exponer el bucket publicamente.
+  # Usa Signature Version 4 (SigV4) para firmar las solicitudes.
+  # ------------------------------------------------------------
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        # Nombre descriptivo del OAC
+        Name: !Sub "${DomainName}-${Environment}-OAC"
+
+        # Descripcion del OAC para identificarlo facilmente
+        Description: !Sub "OAC para acceso privado al bucket S3 del sitio ${DomainName}"
+
+        # Tipo de origen al que se aplica este OAC (solo S3 en este caso)
+        OriginAccessControlOriginType: s3
+
+        # Comportamiento de firma: always = siempre firma todas las solicitudes a S3
+        SigningBehavior: always
+
+        # Protocolo de firma: sigv4 = Signature Version 4 de AWS (el mas seguro)
+        SigningProtocol: sigv4
+
+  # ------------------------------------------------------------
+  # BUCKET POLICY S3 - Se crea aqui porque necesita el ID del OAC
+  # Solo permite solicitudes que vengan del OAC de esta distribucion
+  # ------------------------------------------------------------
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      # Aplica la politica al bucket S3 creado en el modulo anterior
+      Bucket: !Ref S3BucketName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontOACAccess           # Identificador de la declaracion
+            Effect: Allow                           # Permite la accion
+            Principal:
+              Service: cloudfront.amazonaws.com     # Solo el servicio CloudFront puede acceder
+            Action: s3:GetObject                    # Solo permite leer objetos (no listar, no escribir)
+            Resource: !Sub "${S3BucketArn}/*"       # Aplica a todos los objetos dentro del bucket
+            Condition:
+              StringEquals:
+                # Condicion clave: solo acepta solicitudes que vengan de ESTA distribucion CloudFront especifica
+                # Esto evita que otras distribuciones puedan acceder al bucket
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  # ------------------------------------------------------------
+  # CLOUDFRONT DISTRIBUTION - Distribucion principal del CDN
+  # ------------------------------------------------------------
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+
+        # ---- ESTADO DE LA DISTRIBUCION ----
+        Enabled: true                              # La distribucion esta activa
+
+        # ---- PAGINA DE INICIO ----
+        DefaultRootObject: index.html              # Archivo que se sirve cuando se accede a la raiz "/"
+
+        # ---- ALIASES (dominios personalizados) ----
+        # CloudFront respondera a solicitudes de estos dominios
+        Aliases:
+          - !Ref DomainName                        # midominio.com
+          - !Ref WWWDomainName                     # www.midominio.com
+
+        # ---- ORIGEN (S3) ----
+        # Define de donde CloudFront obtiene el contenido
+        Origins:
+          - Id: S3Origin                           # Identificador unico del origen
+            # Dominio regional del bucket S3 (IMPORTANTE: usar regional, no global)
+            DomainName: !Ref S3BucketRegionalDomain
+            # Asocia este origen con el OAC creado arriba
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              # OriginAccessIdentity vacio porque usamos OAC (no OAI legacy)
+              OriginAccessIdentity: ""
+
+        # ---- COMPORTAMIENTO DE CACHE POR DEFECTO ----
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin                 # Envia el trafico al origen S3 definido arriba
+
+          # ---- POLITICA DE PROTOCOLO ----
+          # Redirige HTTP a HTTPS automaticamente para mayor seguridad
+          ViewerProtocolPolicy: redirect-to-https
+
+          # ---- METODOS HTTP PERMITIDOS ----
+          # Para sitios estaticos solo se necesita GET y HEAD
+          AllowedMethods:
+            - GET
+            - HEAD
+
+          # ---- METODOS QUE SE CACHEAN ----
+          CachedMethods:
+            - GET
+            - HEAD
+
+          # ---- POLITICA DE CACHE GESTIONADA ----
+          # CachingOptimized: politica de AWS optimizada para contenido estatico
+          # Maximiza el hit rate del cache para mejor performance
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # ID de "CachingOptimized" (politica gestionada por AWS)
+
+          # ---- COMPRESION ----
+          # CloudFront comprime automaticamente los archivos (gzip/brotli)
+          # Reduce el tamaño de transferencia y mejora la velocidad de carga
+          Compress: true
+
+        # ---- PAGINAS DE ERROR PERSONALIZADAS ----
+        # Redirige errores 403 y 404 a index.html
+        # Util para SPA (Single Page Applications) con enrutamiento en el cliente
+        CustomErrorResponses:
+          - ErrorCode: 403                         # Error 403: Forbidden (cuando S3 no encuentra el archivo)
+            ResponsePagePath: /index.html          # Redirige a index.html
+            ResponseCode: 200                      # Responde con codigo 200 al navegador
+            ErrorCachingMinTTL: 10                 # Cachea el error por 10 segundos
+
+          - ErrorCode: 404                         # Error 404: Not Found
+            ResponsePagePath: /index.html          # Redirige a index.html
+            ResponseCode: 200                      # Responde con codigo 200 al navegador
+            ErrorCachingMinTTL: 10                 # Cachea el error por 10 segundos
+
+        # ---- CERTIFICADO SSL ----
+        ViewerCertificate:
+          AcmCertificateArn: !Ref CertificateArn   # ARN del certificado SSL de ACM
+          SslSupportMethod: sni-only               # SNI: metodo moderno y gratuito (no dedicado)
+          MinimumProtocolVersion: TLSv1.2_2021     # Version minima de TLS (la mas segura disponible)
+
+        # ---- RESTRICCIONES GEOGRAFICAS ----
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none                  # Sin restricciones geograficas (acceso desde cualquier pais)
+
+        # ---- CLASE DE PRECIO ----
+        # PriceClass_All: usa todas las ubicaciones de edge de CloudFront en el mundo
+        # Opciones: PriceClass_100 (solo NA/EU) | PriceClass_200 | PriceClass_All
+        PriceClass: PriceClass_All
+
+        # ---- COMENTARIO DESCRIPTIVO ----
+        Comment: !Sub "Distribucion CloudFront para ${DomainName} - ${Environment}"
+
+        # ---- HTTP VERSION ----
+        HttpVersion: http2and3                    # Soporta HTTP/2 y HTTP/3 para mejor performance
+
+      # ---- TAGS DE IDENTIFICACION ----
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: CDNDistribution
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# Valores que necesita el modulo de Route53 para crear los registros DNS
+# ==============================================================
+Outputs:
+
+  # ID de la distribucion (util para invalidaciones de cache en el pipeline CI/CD)
+  DistributionId:
+    Description: "ID de la distribucion CloudFront"
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub "${AWS::StackName}-DistributionId"
+
+  # Dominio de CloudFront (ej: d1234abcd.cloudfront.net)
+  # Route53 necesita este valor para crear el registro Alias
+  CloudFrontDomainName:
+    Description: "Dominio de la distribucion CloudFront"
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudFrontDomainName"
+
+  # Hosted Zone ID fijo de CloudFront
+  # IMPORTANTE: Este valor es SIEMPRE Z2FDTNDATAQYW2 para todas las distribuciones CloudFront
+  # Route53 lo necesita para crear registros de tipo Alias
+  CloudFrontHostedZoneId:
+    Description: "Hosted Zone ID de CloudFront (siempre Z2FDTNDATAQYW2)"
+    Value: Z2FDTNDATAQYW2
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudFrontHostedZoneId"

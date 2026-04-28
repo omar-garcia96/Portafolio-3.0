@@ -1,0 +1,404 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo CodeBuild - Crea los proyectos de CI/CD para el sitio web.
+  Incluye dos proyectos:
+    - BuildProject: instala dependencias, compila el frontend
+      y empaqueta el codigo de la Lambda en un zip.
+    - DeployProject: sincroniza el frontend con S3, invalida
+      el cache de CloudFront y actualiza el codigo de la Lambda.
+  Tambien crea el bucket S3 donde se almacenan los artefactos
+  del pipeline entre etapas.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Ambiente de despliegue
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue"
+
+  # Nombre del bucket S3 del sitio web (destino del deploy del frontend)
+  S3WebsiteBucketName:
+    Type: String
+    Description: "Bucket S3 donde se despliega el sitio web"
+
+  # ID de la distribucion CloudFront (para invalidar el cache tras el deploy)
+  CloudFrontDistributionId:
+    Type: String
+    Description: "ID de la distribucion CloudFront"
+
+  # Nombre de la funcion Lambda (para actualizar su codigo tras el deploy)
+  LambdaFunctionName:
+    Type: String
+    Description: "Nombre de la funcion Lambda del formulario"
+
+  # Comando para compilar el frontend
+  # Cambia esto segun el framework que uses (React, Vue, etc.)
+  BuildCommand:
+    Type: String
+    Default: "npm run build"
+    Description: "Comando para compilar el frontend (ej: npm run build)"
+
+  # Directorio de salida generado por el comando de build
+  # React genera 'build', Vite genera 'dist', etc.
+  BuildOutputDir:
+    Type: String
+    Default: "dist"
+    Description: "Directorio de salida del build (ej: dist, build)"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # BUCKET S3 DE ARTEFACTOS
+  # Almacena los artefactos entre etapas del pipeline
+  # (codigo fuente, archivos compilados, zips de Lambda)
+  # ------------------------------------------------------------
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    # DeletionPolicy Retain: protege los artefactos si el stack se elimina por error
+    DeletionPolicy: Retain
+    Properties:
+
+      # Nombre unico combinando proposito, cuenta y ambiente
+      BucketName: !Sub "website-pipeline-artifacts-${AWS::AccountId}-${Environment}"
+
+      # ---- BLOQUEO DE ACCESO PUBLICO ----
+      # Los artefactos son privados, nadie debe acceder directamente
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls:       true
+        BlockPublicPolicy:     true
+        IgnorePublicAcls:      true
+        RestrictPublicBuckets: true
+
+      # ---- CIFRADO EN REPOSO ----
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      # ---- CICLO DE VIDA DE ARTEFACTOS ----
+      # Elimina artefactos con mas de 30 dias para reducir costos de almacenamiento
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 30              # Artefactos mas viejos de 30 dias se eliminan automaticamente
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: PipelineArtifacts
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # IAM ROLE PARA CODEBUILD
+  # Permisos minimos y especificos que necesitan los proyectos de build
+  # ------------------------------------------------------------
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+
+      RoleName: !Sub "website-codebuild-role-${Environment}"
+
+      # ---- TRUST POLICY ----
+      # Solo el servicio CodeBuild puede asumir este rol
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+
+        # Permiso para escribir logs en CloudWatch
+        - PolicyName: CloudWatchLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+
+        # Permiso para leer y escribir artefactos en el bucket de artefactos
+        - PolicyName: ArtifactsBucketPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                Resource:
+                  - !GetAtt ArtifactsBucket.Arn                  # El bucket en si
+                  - !Sub "${ArtifactsBucket.Arn}/*"              # Los objetos dentro del bucket
+
+        # Permiso para sincronizar archivos al bucket del sitio web
+        - PolicyName: S3WebsiteDeployPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject                                  # Subir archivos nuevos o actualizados
+                  - s3:DeleteObject                               # Eliminar archivos que ya no existen
+                  - s3:ListBucket                                 # Listar archivos para comparar (--delete)
+                  - s3:GetObject                                  # Leer archivos existentes
+                Resource:
+                  - !Sub "arn:aws:s3:::${S3WebsiteBucketName}"   # El bucket del sitio
+                  - !Sub "arn:aws:s3:::${S3WebsiteBucketName}/*" # Los archivos del bucket
+
+        # Permiso para invalidar el cache de CloudFront despues del deploy
+        - PolicyName: CloudFrontInvalidationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudfront:CreateInvalidation               # Crea una invalidacion de cache
+                Resource: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistributionId}"
+
+        # Permiso para actualizar el codigo de la funcion Lambda especifica
+        - PolicyName: LambdaUpdatePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode                   # Actualiza el zip de la funcion
+                Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${LambdaFunctionName}"
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # PROYECTO BUILD
+  # Instala dependencias, compila el frontend y empaqueta la Lambda.
+  # El artefacto de salida contiene los archivos del frontend
+  # mas el zip de la Lambda para que el proyecto de deploy los use.
+  # ------------------------------------------------------------
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+
+      Name: !Sub "website-build-${Environment}"
+      Description: "Compila el frontend y empaqueta el codigo de la Lambda"
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+
+      # ---- ENTORNO DE EJECUCION ----
+      Environment:
+        Type:        LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL         # Instancia pequeña, suficiente para proyectos personales
+        Image:       aws/codebuild/standard:7.0   # Imagen con Node.js 20 y Python 3.12 preinstalados
+
+        # Variables de entorno disponibles en el buildspec
+        EnvironmentVariables:
+          - Name:  BUILD_COMMAND                  # Comando de build configurable sin tocar el buildspec
+            Value: !Ref BuildCommand
+          - Name:  BUILD_OUTPUT_DIR               # Directorio de salida configurable
+            Value: !Ref BuildOutputDir
+
+      # ---- ORIGEN ----
+      # CODEPIPELINE: CodeBuild recibe el codigo del stage Source del pipeline
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              runtime-versions:
+                nodejs: 20                        # Version LTS de Node.js para compilar el frontend
+              commands:
+                # Instala las dependencias del proyecto frontend definidas en package.json
+                - echo "--- Instalando dependencias del frontend ---"
+                - npm install
+
+            build:
+              commands:
+                # Ejecuta el comando de build (ej: npm run build) configurado como variable de entorno
+                - echo "--- Compilando el frontend ---"
+                - $BUILD_COMMAND
+
+                # Empaqueta el codigo de la Lambda
+                # NOTA: El codigo de la Lambda debe estar en la carpeta /lambda del repositorio
+                - echo "--- Empaquetando la funcion Lambda ---"
+                - cd lambda && zip -r ../lambda-package.zip . && cd ..
+
+                # Copia el zip de la Lambda al directorio de build del frontend
+                # Asi ambos quedan en el mismo artefacto de salida
+                - cp lambda-package.zip $BUILD_OUTPUT_DIR/
+
+            post_build:
+              commands:
+                - echo "--- Build completado exitosamente ---"
+
+          artifacts:
+            # Exporta todo el contenido del directorio de build como artefacto
+            # Incluye los archivos del frontend + lambda-package.zip copiado arriba
+            files:
+              - '**/*'
+            base-directory: $BUILD_OUTPUT_DIR
+
+      # ---- ARTEFACTOS DE SALIDA ----
+      # CODEPIPELINE: devuelve los artefactos al pipeline para el siguiente stage
+      Artifacts:
+        Type: CODEPIPELINE
+
+      # ---- LOGS EN CLOUDWATCH ----
+      LogsConfig:
+        CloudWatchLogs:
+          Status:    ENABLED
+          GroupName: !Sub "/aws/codebuild/website-build-${Environment}"
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: BuildFrontendAndLambda
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # PROYECTO DEPLOY
+  # Recibe el artefacto del BuildProject y realiza el deploy:
+  #   1. Sincroniza los archivos del frontend con el bucket S3
+  #   2. Invalida el cache de CloudFront para que los usuarios
+  #      vean los cambios de inmediato
+  #   3. Actualiza el codigo de la funcion Lambda
+  # ------------------------------------------------------------
+  DeployProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+
+      Name: !Sub "website-deploy-${Environment}"
+      Description: "Despliega el sitio en S3, invalida CloudFront y actualiza la Lambda"
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+
+      # ---- ENTORNO DE EJECUCION ----
+      Environment:
+        Type:        LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image:       aws/codebuild/standard:7.0
+
+        # Variables de entorno con los destinos del deploy
+        EnvironmentVariables:
+          - Name:  S3_BUCKET                      # Bucket donde se despliega el frontend
+            Value: !Ref S3WebsiteBucketName
+          - Name:  CF_DISTRIBUTION_ID             # Distribucion CloudFront a invalidar
+            Value: !Ref CloudFrontDistributionId
+          - Name:  LAMBDA_FUNCTION_NAME           # Lambda cuyo codigo se actualiza
+            Value: !Ref LambdaFunctionName
+
+      # ---- ORIGEN ----
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                # ---- DEPLOY FRONTEND ----
+                # Sincroniza los archivos del build con el bucket S3 del sitio web
+                # --delete: elimina del bucket los archivos que ya no existen en el build
+                # --exclude: no sube el zip de la Lambda al bucket del sitio
+                - echo "--- Sincronizando frontend con S3 ---"
+                - aws s3 sync . s3://$S3_BUCKET --delete --exclude "lambda-package.zip"
+
+                # ---- INVALIDACION CLOUDFRONT ----
+                # Invalida todos los archivos en cache para que los usuarios
+                # reciban la nueva version del sitio inmediatamente
+                - echo "--- Invalidando cache de CloudFront ---"
+                - aws cloudfront create-invalidation --distribution-id $CF_DISTRIBUTION_ID --paths "/*"
+
+                # ---- DEPLOY LAMBDA ----
+                # Actualiza el codigo de la funcion Lambda con el zip empaquetado en el build
+                - echo "--- Actualizando codigo de la funcion Lambda ---"
+                - aws lambda update-function-code --function-name $LAMBDA_FUNCTION_NAME --zip-file fileb://lambda-package.zip
+
+            post_build:
+              commands:
+                - echo "--- Deploy completado exitosamente ---"
+
+      Artifacts:
+        Type: CODEPIPELINE
+
+      # ---- LOGS EN CLOUDWATCH ----
+      LogsConfig:
+        CloudWatchLogs:
+          Status:    ENABLED
+          GroupName: !Sub "/aws/codebuild/website-deploy-${Environment}"
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: DeployFrontendAndLambda
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # CLOUDWATCH LOG GROUPS
+  # Se crean explicitamente para controlar la retencion de logs
+  # ------------------------------------------------------------
+  BuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/codebuild/website-build-${Environment}"
+      RetentionInDays: 30                         # Retiene logs por 30 dias
+
+  DeployProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/codebuild/website-deploy-${Environment}"
+      RetentionInDays: 30
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# Valores que necesita el modulo de CodePipeline
+# ==============================================================
+Outputs:
+
+  # Nombre del proyecto de build (el pipeline lo usa para referenciar la accion)
+  BuildProjectName:
+    Description: "Nombre del proyecto CodeBuild de build"
+    Value: !Ref BuildProject
+    Export:
+      Name: !Sub "${AWS::StackName}-BuildProjectName"
+
+  # Nombre del proyecto de deploy
+  DeployProjectName:
+    Description: "Nombre del proyecto CodeBuild de deploy"
+    Value: !Ref DeployProject
+    Export:
+      Name: !Sub "${AWS::StackName}-DeployProjectName"
+
+  # Nombre del bucket de artefactos (el pipeline lo usa para almacenar entre etapas)
+  ArtifactsBucketName:
+    Description: "Nombre del bucket S3 de artefactos del pipeline"
+    Value: !Ref ArtifactsBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ArtifactsBucketName"
+
+  # ARN del bucket de artefactos (el rol de CodePipeline necesita el ARN para los permisos)
+  ArtifactsBucketArn:
+    Description: "ARN del bucket S3 de artefactos"
+    Value: !GetAtt ArtifactsBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ArtifactsBucketArn"

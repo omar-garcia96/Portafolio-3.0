@@ -1,0 +1,196 @@
+/* ============================================================
+   globals.css
+   Estilos base del sitio. Se divide en:
+     1. Importación de fuente
+     2. Variables CSS (colores, fuente)
+     3. Reset y estilos base
+     4. Scrollbar personalizado
+     5. Clases de utilidad reutilizables (terminal, glow, etc.)
+     6. Efecto scanline y ruido CRT
+     7. Animación de entrada de secciones
+     8. Keyframes
+   ============================================================ */
+
+/* 1. Fuente JetBrains Mono desde Google Fonts
+      Es monospace con ligaduras — perfecta para estética terminal */
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100..800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── 2. Variables CSS globales ──────────────────────────────
+   Definidas aquí para poder usarlas en CSS puro (fuera de Tailwind) */
+:root {
+  --bg:        #080c10;
+  --surface:   #0d1117;
+  --border:    #1a2332;
+  --green:     #00ff41;
+  --cyan:      #00d4ff;
+  --dim:       #4a9f5c;
+  --muted:     #8b949e;
+  --text:      #c9d1d9;
+  --red:       #ff4444;
+  --yellow:    #ffd700;
+  --font-mono: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+}
+
+/* ── 3. Reset y base ─────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  scroll-behavior: smooth;
+  /* Compensa la altura del Navbar fijo al navegar por anclas */
+  scroll-padding-top: 60px;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  overflow-x: hidden; /* evita scroll horizontal en móvil */
+}
+
+/* Resaltado de texto seleccionado */
+::selection {
+  background: rgba(0, 255, 65, 0.25);
+  color: var(--green);
+}
+
+/* ── 4. Scrollbar personalizado (solo Webkit/Chrome/Edge) ── */
+::-webkit-scrollbar       { width: 5px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--green); }
+
+/* ── 5. Clases de utilidad reutilizables ─────────────────── */
+
+/* Ventana estilo terminal (bordes, fondo oscuro) */
+.terminal-window {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* Barra de título de ventana terminal (puntos de colores) */
+.terminal-titlebar {
+  background: #161b22;
+  padding: 7px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Punto circular (rojo / amarillo / verde) */
+.terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+/* Texto verde neón con sombra de brillo */
+.glow-green {
+  text-shadow:
+    0 0 8px  rgba(0,255,65,0.8),
+    0 0 20px rgba(0,255,65,0.4),
+    0 0 40px rgba(0,255,65,0.15);
+}
+
+/* Borde con sutil brillo verde */
+.glow-border {
+  box-shadow:
+    0 0 10px rgba(0,255,65,0.15),
+    inset 0 0 6px rgba(0,255,65,0.04);
+}
+
+/* Patrón de cuadrícula en el fondo (sección Hero) */
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(0,255,65,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,65,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Input de formulario estilo terminal (sin borde visible,
+   solo una línea inferior que se ilumina al enfocar)      */
+.terminal-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 6px 0;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.terminal-input:focus { border-bottom-color: var(--green); }
+.terminal-input::placeholder { color: var(--muted); }
+
+/* ── 6. Efectos CRT (pantalla vieja) ─────────────────────── */
+
+/* Línea translúcida que baja por la pantalla simulando un monitor CRT */
+.scanlines::before {
+  content: "";
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+  background: rgba(0,255,65,0.06);
+  animation: scanline 8s linear infinite;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Capa de ruido/grano muy sutil encima de todo */
+.crt-noise::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  /* SVG inline de ruido fractal como fondo */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9998;
+  opacity: 0.35;
+}
+
+/* ── 7. Animación de entrada de secciones ─────────────────── */
+
+/* Estado inicial: invisible y desplazada hacia abajo */
+.fade-up {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.65s ease, transform 0.65s ease;
+}
+
+/* Se agrega la clase "visible" desde JS (IntersectionObserver)
+   cuando el elemento entra en el viewport                      */
+.fade-up.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── 8. Keyframes ────────────────────────────────────────── */
+
+/* Cursor parpadeante: full → invisible → full */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* Glitch: micro-desplazamientos en momentos específicos */
+@keyframes glitch {
+  0%, 88%, 100% { transform: translate(0); }
+  90% { transform: translate(-2px,  1px); }
+  92% { transform: translate( 2px, -1px); }
+  94% { transform: translate(-1px,  2px); }
+}
+
+/* Scanline: línea que recorre la pantalla de arriba a abajo */
+@keyframes scanline {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
+}
+
+/* Entrada desde abajo con opacidad */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}

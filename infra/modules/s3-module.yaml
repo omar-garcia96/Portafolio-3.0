@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo S3 - Crea el bucket privado para el hosting del sitio web estatico.
+  El bucket NO tiene acceso publico. Solo CloudFront puede acceder a el
+  mediante OAC (Origin Access Control). La politica del bucket
+  se gestiona en el modulo de CloudFront para evitar dependencias circulares.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Nombre del dominio (se usa para nombrar el bucket de forma unica)
+  DomainName:
+    Type: String
+    Description: "Dominio del sitio web, se usa para nombrar el bucket"
+
+  # Ambiente para diferenciar buckets entre entornos
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue (dev, staging, prod)"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # BUCKET S3 - Almacenamiento privado de archivos estaticos
+  # ------------------------------------------------------------
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    # DeletionPolicy Retain: Si el stack se elimina, el bucket NO se borra
+    # Esto protege el contenido del sitio web en caso de error
+    DeletionPolicy: Retain
+    Properties:
+
+      # Nombre del bucket: combinacion de dominio y ambiente para ser unico
+      # Ejemplo: midominio.com-prod-website
+      BucketName: !Sub "${DomainName}-${Environment}-website"
+
+      # ---- BLOQUEO TOTAL DE ACCESO PUBLICO ----
+      # Ninguna ACL ni politica puede hacer el bucket o sus objetos publicos
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls:       true   # Bloquea la creacion de ACLs publicas nuevas
+        BlockPublicPolicy:     true   # Bloquea politicas de bucket que den acceso publico
+        IgnorePublicAcls:      true   # Ignora cualquier ACL publica existente
+        RestrictPublicBuckets: true   # Impide acceso publico aunque exista una politica publica
+
+      # ---- CIFRADO EN REPOSO ----
+      # Todos los archivos del bucket se cifran automaticamente con AES-256
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256   # Algoritmo de cifrado AES-256 (SSE-S3)
+
+      # ---- VERSIONADO ----
+      # Guarda versiones anteriores de los archivos
+      # Permite hacer rollback a versiones previas del sitio web
+      VersioningConfiguration:
+        Status: Enabled
+
+      # ---- REGLA DE CICLO DE VIDA ----
+      # Limpia versiones antiguas automaticamente para ahorrar costos
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions                    # Identificador de la regla
+            Status: Enabled                          # Regla activa
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30                     # Elimina versiones con mas de 30 dias de antigüedad
+
+      # ---- TAGS DE IDENTIFICACION ----
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: StaticWebsiteHosting
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# Valores que necesita el modulo de CloudFront para conectarse
+# ==============================================================
+Outputs:
+
+  # Nombre del bucket (lo usa CloudFront para crear la politica)
+  BucketName:
+    Description: "Nombre del bucket S3"
+    Value: !Ref WebsiteBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketName"   # Exportado para referencia cruzada
+
+  # ARN del bucket (lo usa CloudFront para la politica de acceso)
+  BucketArn:
+    Description: "ARN del bucket S3"
+    Value: !GetAtt WebsiteBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketArn"
+
+  # Dominio regional del bucket
+  # IMPORTANTE: Se debe usar el dominio REGIONAL (no el global) con OAC
+  # para evitar errores de redireccion 307 en CloudFront
+  BucketRegionalDomainName:
+    Description: "Dominio regional del bucket S3 (requerido para OAC en CloudFront)"
+    Value: !GetAtt WebsiteBucket.RegionalDomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-BucketRegionalDomainName"

@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo Route53 - Crea los registros DNS para apuntar el dominio
+  y el subdominio www hacia la distribucion de CloudFront.
+  Se crean registros tipo A (Alias) para IPv4 e AAAA (Alias) para IPv6.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Dominio principal del sitio web
+  DomainName:
+    Type: String
+    Description: "Dominio principal (ej: midominio.com)"
+
+  # Subdominio www
+  WWWDomainName:
+    Type: String
+    Description: "Subdominio www (ej: www.midominio.com)"
+
+  # Dominio de la distribucion CloudFront (viene del output de CloudFrontStack)
+  CloudFrontDomainName:
+    Type: String
+    Description: "Dominio de la distribucion CloudFront (ej: d1234abcd.cloudfront.net)"
+
+  # Hosted Zone ID de CloudFront (siempre Z2FDTNDATAQYW2)
+  CloudFrontHostedZoneId:
+    Type: String
+    Description: "Hosted Zone ID de CloudFront"
+    Default: Z2FDTNDATAQYW2                        # Este valor es fijo para todas las distribuciones CloudFront
+
+  # Ambiente de despliegue
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue (dev, staging, prod)"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # HOSTED ZONE
+  # La zona hosteada en Route53 para el dominio principal
+  # NOTA: Si ya tienes una Hosted Zone existente, comenta este recurso
+  # y usa un parametro HostedZoneId para referenciarla
+  # ------------------------------------------------------------
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      # Nombre del dominio para el que se crea la zona
+      Name: !Ref DomainName
+      HostedZoneConfig:
+        # Comentario descriptivo de la zona
+        Comment: !Sub "Zona hosteada para ${DomainName} - Ambiente: ${Environment}"
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ------------------------------------------------------------
+  # REGISTRO A (IPv4) - Dominio raiz apuntando a CloudFront
+  # Tipo Alias: no tiene costo adicional en Route53 y soporta apex domain
+  # Un registro CNAME no funciona para apex domain (midominio.com)
+  # por eso se usa Alias
+  # ------------------------------------------------------------
+  RootAliasRecordIPv4:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZone                # ID de la zona hosteada creada arriba
+      Name: !Ref DomainName                        # Nombre del registro: midominio.com
+      Type: A                                      # Tipo A = registro IPv4
+
+      # Alias apunta a CloudFront en lugar de una IP estatica
+      AliasTarget:
+        DNSName: !Ref CloudFrontDomainName         # Dominio de CloudFront (ej: d1234.cloudfront.net)
+        HostedZoneId: !Ref CloudFrontHostedZoneId  # Hosted Zone ID de CloudFront (Z2FDTNDATAQYW2)
+        EvaluateTargetHealth: false                # No evalua salud del target (no aplica para CloudFront)
+
+  # ------------------------------------------------------------
+  # REGISTRO AAAA (IPv6) - Dominio raiz apuntando a CloudFront
+  # Igual que el registro A pero para IPv6
+  # CloudFront soporta IPv6 nativamente
+  # ------------------------------------------------------------
+  RootAliasRecordIPv6:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZone                # ID de la zona hosteada
+      Name: !Ref DomainName                        # Nombre del registro: midominio.com
+      Type: AAAA                                   # Tipo AAAA = registro IPv6
+
+      # Alias apunta a CloudFront
+      AliasTarget:
+        DNSName: !Ref CloudFrontDomainName         # Dominio de CloudFront
+        HostedZoneId: !Ref CloudFrontHostedZoneId  # Hosted Zone ID de CloudFront
+        EvaluateTargetHealth: false                # Sin evaluacion de salud
+
+  # ------------------------------------------------------------
+  # REGISTRO A (IPv4) - Subdominio www apuntando a CloudFront
+  # Crea el registro para www.midominio.com
+  # ------------------------------------------------------------
+  WWWAliasRecordIPv4:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZone                # ID de la zona hosteada
+      Name: !Ref WWWDomainName                     # Nombre del registro: www.midominio.com
+      Type: A                                      # Tipo A = registro IPv4
+
+      # Alias apunta a la misma distribucion CloudFront
+      AliasTarget:
+        DNSName: !Ref CloudFrontDomainName         # Dominio de CloudFront
+        HostedZoneId: !Ref CloudFrontHostedZoneId  # Hosted Zone ID de CloudFront
+        EvaluateTargetHealth: false                # Sin evaluacion de salud
+
+  # ------------------------------------------------------------
+  # REGISTRO AAAA (IPv6) - Subdominio www apuntando a CloudFront
+  # ------------------------------------------------------------
+  WWWAliasRecordIPv6:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZone                # ID de la zona hosteada
+      Name: !Ref WWWDomainName                     # Nombre del registro: www.midominio.com
+      Type: AAAA                                   # Tipo AAAA = registro IPv6
+
+      # Alias apunta a CloudFront
+      AliasTarget:
+        DNSName: !Ref CloudFrontDomainName         # Dominio de CloudFront
+        HostedZoneId: !Ref CloudFrontHostedZoneId  # Hosted Zone ID de CloudFront
+        EvaluateTargetHealth: false                # Sin evaluacion de salud
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# ==============================================================
+Outputs:
+
+  # ID de la zona hosteada (util para agregar mas registros en el futuro)
+  HostedZoneId:
+    Description: "ID de la Hosted Zone en Route53"
+    Value: !Ref HostedZone
+    Export:
+      Name: !Sub "${AWS::StackName}-HostedZoneId"
+
+  # Name Servers asignados por Route53 a la zona
+  # IMPORTANTE: Debes configurar estos NS en tu registrador de dominio
+  # si el dominio NO fue comprado en Route53
+  NameServers:
+    Description: "Name Servers de Route53 (configuralos en tu registrador de dominio)"
+    Value: !Join
+      - ", "
+      - !GetAtt HostedZone.NameServers               # Lista de NS separados por coma

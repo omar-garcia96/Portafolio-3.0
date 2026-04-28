@@ -1,0 +1,344 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Template principal que orquesta todos los modulos de infraestructura
+  del sitio web estatico. Este archivo actua como punto de entrada y
+  conecta los modulos de S3, CloudFront, Route53, DynamoDB, SNS,
+  Lambda y API Gateway.
+
+# ==============================================================
+# PARAMETROS GLOBALES
+# Valores que se reutilizan en todos los modulos
+# ==============================================================
+Parameters:
+
+  # Nombre del dominio principal del sitio web (ej: midominio.com)
+  DomainName:
+    Type: String
+    Description: "Dominio principal del sitio web. Ejemplo: midominio.com"
+
+  # Subdominio www del sitio web (ej: www.midominio.com)
+  WWWDomainName:
+    Type: String
+    Description: "Subdominio www. Ejemplo: www.midominio.com"
+
+  # ARN del certificado SSL/TLS en AWS Certificate Manager
+  # IMPORTANTE: El certificado DEBE estar creado en us-east-1 para usarse con CloudFront
+  CertificateArn:
+    Type: String
+    Description: "ARN del certificado SSL en ACM (debe estar en us-east-1)"
+
+  # Bucket S3 donde se almacenan los templates de CloudFormation (para nested stacks)
+  TemplatesS3Bucket:
+    Type: String
+    Description: "Nombre del bucket S3 que contiene los templates de CloudFormation"
+
+  # Correo electronico que recibira las notificaciones cuando se llene el formulario
+  # IMPORTANTE: AWS enviara un email de confirmacion a esta direccion
+  # El suscriptor DEBE aceptar el email antes de recibir notificaciones
+  NotificationEmail:
+    Type: String
+    Description: "Email para recibir notificaciones del formulario de contacto"
+
+  # Ambiente de despliegue (solo prod para este proyecto)
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - prod
+    Description: "Ambiente de despliegue"
+
+  # Propietario del repositorio GitHub (usuario u organizacion)
+  GitHubOwner:
+    Type: String
+    Description: "Usuario u organizacion de GitHub (ej: miusuario)"
+
+  # Nombre del repositorio en GitHub
+  GitHubRepo:
+    Type: String
+    Description: "Nombre del repositorio en GitHub (ej: mi-sitio-web)"
+
+  # Rama que dispara el pipeline
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: "Rama de GitHub que dispara el pipeline"
+
+  # ARN de la conexion CodeStar (creada manualmente en la consola de AWS)
+  CodeStarConnectionArn:
+    Type: String
+    Description: "ARN de la conexion CodeStar a GitHub"
+
+  # Comando de build del frontend
+  BuildCommand:
+    Type: String
+    Default: "npm run build"
+    Description: "Comando para compilar el frontend"
+
+  # Directorio de salida del build
+  BuildOutputDir:
+    Type: String
+    Default: "dist"
+    Description: "Directorio de salida del build (ej: dist, build)"
+
+# ==============================================================
+# RECURSOS - NESTED STACKS (Modulos)
+# Cada modulo es un stack independiente referenciado desde aqui.
+# El orden de DependsOn es importante para respetar las dependencias
+# entre modulos y que los Outputs esten disponibles cuando se necesitan.
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # MODULO 1: S3
+  # Crea el bucket privado donde se almacenan los archivos del sitio.
+  # No depende de ningun otro modulo, se crea primero.
+  # ------------------------------------------------------------
+  S3Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/s3-module.yaml"
+      Parameters:
+        DomainName:  !Ref DomainName     # Pasa el dominio para nombrar el bucket
+        Environment: !Ref Environment    # Ambiente de despliegue
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: S3
+
+  # ------------------------------------------------------------
+  # MODULO 2: CLOUDFRONT
+  # Crea la distribucion CDN + OAC + Politica del bucket S3.
+  # Depende de S3Stack porque necesita el nombre, ARN y dominio del bucket.
+  # ------------------------------------------------------------
+  CloudFrontStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: S3Stack                             # Espera a que S3 este completamente creado
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/cloudfront-module.yaml"
+      Parameters:
+        DomainName:              !Ref DomainName                                      # Dominio principal
+        WWWDomainName:           !Ref WWWDomainName                                   # Subdominio www
+        CertificateArn:          !Ref CertificateArn                                  # Certificado SSL
+        S3BucketName:            !GetAtt S3Stack.Outputs.BucketName                   # Nombre del bucket
+        S3BucketArn:             !GetAtt S3Stack.Outputs.BucketArn                    # ARN del bucket
+        S3BucketRegionalDomain:  !GetAtt S3Stack.Outputs.BucketRegionalDomainName     # Dominio regional del bucket
+        Environment:             !Ref Environment                                      # Ambiente
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: CloudFront
+
+  # ------------------------------------------------------------
+  # MODULO 3: ROUTE53
+  # Crea los registros DNS que apuntan el dominio a CloudFront.
+  # Depende de CloudFrontStack porque necesita el dominio de la distribucion.
+  # ------------------------------------------------------------
+  Route53Stack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: CloudFrontStack                     # Espera a que CloudFront este completamente creado
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/route53-module.yaml"
+      Parameters:
+        DomainName:             !Ref DomainName                                             # Dominio principal
+        WWWDomainName:          !Ref WWWDomainName                                          # Subdominio www
+        CloudFrontDomainName:   !GetAtt CloudFrontStack.Outputs.CloudFrontDomainName        # Dominio CloudFront
+        CloudFrontHostedZoneId: !GetAtt CloudFrontStack.Outputs.CloudFrontHostedZoneId      # Hosted Zone ID de CloudFront
+        Environment:            !Ref Environment                                             # Ambiente
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: Route53
+
+  # ------------------------------------------------------------
+  # MODULO 4: DYNAMODB
+  # Crea la tabla donde se almacenan los datos del formulario.
+  # No depende de otros modulos, puede crearse en paralelo con S3.
+  # ------------------------------------------------------------
+  DynamoDBStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/dynamodb-module.yaml"
+      Parameters:
+        Environment: !Ref Environment              # Ambiente
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: DynamoDB
+
+  # ------------------------------------------------------------
+  # MODULO 5: SNS
+  # Crea el topic de notificaciones que se dispara cuando
+  # la Lambda guarda exitosamente los datos del formulario.
+  # No depende de otros modulos, puede crearse en paralelo.
+  # ------------------------------------------------------------
+  SNSStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/sns-module.yaml"
+      Parameters:
+        Environment:       !Ref Environment        # Ambiente
+        NotificationEmail: !Ref NotificationEmail  # Email para recibir notificaciones
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: SNS
+
+  # ------------------------------------------------------------
+  # MODULO 6: LAMBDA
+  # Crea la funcion que procesa los datos del formulario.
+  # Depende de DynamoDBStack y SNSStack porque necesita sus ARNs
+  # para configurar el rol IAM y las variables de entorno.
+  # ------------------------------------------------------------
+  LambdaStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - DynamoDBStack                              # Espera el ARN de la tabla DynamoDB
+      - SNSStack                                   # Espera el ARN del topic SNS
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/lambda-module.yaml"
+      Parameters:
+        Environment:       !Ref Environment                           # Ambiente
+        DynamoDBTableName: !GetAtt DynamoDBStack.Outputs.TableName    # Nombre de la tabla DynamoDB
+        DynamoDBTableArn:  !GetAtt DynamoDBStack.Outputs.TableArn     # ARN de la tabla DynamoDB
+        SNSTopicArn:       !GetAtt SNSStack.Outputs.TopicArn          # ARN del topic SNS
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: Lambda
+
+  # ------------------------------------------------------------
+  # MODULO 7: API GATEWAY
+  # Crea el API REST que recibe los datos del formulario
+  # y los envia a la funcion Lambda.
+  # Depende de LambdaStack porque necesita el ARN de la funcion.
+  # ------------------------------------------------------------
+  ApiGatewayStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: LambdaStack                         # Espera el ARN de la Lambda
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/apigateway-module.yaml"
+      Parameters:
+        Environment:        !Ref Environment                           # Ambiente
+        LambdaFunctionArn:  !GetAtt LambdaStack.Outputs.FunctionArn   # ARN de la funcion Lambda
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: ApiGateway
+
+  # ------------------------------------------------------------
+  # MODULO 8: CODEBUILD
+  # Crea los proyectos de build/deploy y el bucket de artefactos.
+  # Depende de S3Stack, CloudFrontStack y LambdaStack porque
+  # necesita el bucket, el ID de CloudFront y el nombre de la Lambda.
+  # ------------------------------------------------------------
+  CodeBuildStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - S3Stack           # Necesita el nombre del bucket del sitio web
+      - CloudFrontStack   # Necesita el ID de la distribucion para invalidaciones
+      - LambdaStack       # Necesita el nombre de la funcion Lambda
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/codebuild-module.yaml"
+      Parameters:
+        Environment:             !Ref Environment
+        S3WebsiteBucketName:     !GetAtt S3Stack.Outputs.BucketName
+        CloudFrontDistributionId: !GetAtt CloudFrontStack.Outputs.DistributionId
+        LambdaFunctionName:      !GetAtt LambdaStack.Outputs.FunctionName
+        BuildCommand:            !Ref BuildCommand
+        BuildOutputDir:          !Ref BuildOutputDir
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: CodeBuild
+
+  # ------------------------------------------------------------
+  # MODULO 9: CODEPIPELINE
+  # Crea el pipeline de CI/CD que orquesta todo el flujo.
+  # Depende de CodeBuildStack porque necesita los nombres de los
+  # proyectos y el bucket de artefactos.
+  # ------------------------------------------------------------
+  CodePipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: CodeBuildStack                      # Espera los proyectos de CodeBuild y el bucket
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesS3Bucket}/modules/codepipeline-module.yaml"
+      Parameters:
+        Environment:          !Ref Environment
+        GitHubOwner:          !Ref GitHubOwner
+        GitHubRepo:           !Ref GitHubRepo
+        GitHubBranch:         !Ref GitHubBranch
+        CodeStarConnectionArn: !Ref CodeStarConnectionArn
+        BuildProjectName:     !GetAtt CodeBuildStack.Outputs.BuildProjectName
+        DeployProjectName:    !GetAtt CodeBuildStack.Outputs.DeployProjectName
+        ArtifactsBucketName:  !GetAtt CodeBuildStack.Outputs.ArtifactsBucketName
+        ArtifactsBucketArn:   !GetAtt CodeBuildStack.Outputs.ArtifactsBucketArn
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Module
+          Value: CodePipeline
+
+# ==============================================================
+# OUTPUTS GLOBALES
+# Valores importantes del stack completo para referencia
+# ==============================================================
+Outputs:
+
+  # ------ FRONTEND ------
+
+  # URL final del sitio web
+  WebsiteURL:
+    Description: "URL publica del sitio web"
+    Value: !Sub "https://${DomainName}"
+
+  # Nombre del bucket S3 (lo usa el pipeline CI/CD para subir los archivos del sitio)
+  S3BucketName:
+    Description: "Nombre del bucket S3 del sitio web"
+    Value: !GetAtt S3Stack.Outputs.BucketName
+
+  # ID de la distribucion CloudFront (lo usa el pipeline para invalidar el cache)
+  CloudFrontDistributionId:
+    Description: "ID de la distribucion CloudFront"
+    Value: !GetAtt CloudFrontStack.Outputs.DistributionId
+
+  # Name Servers de Route53 para configurar en el registrador de dominio
+  # Solo aplica si el dominio NO fue comprado en Route53
+  Route53NameServers:
+    Description: "Name Servers de Route53 (configuralos en tu registrador de dominio si aplica)"
+    Value: !GetAtt Route53Stack.Outputs.NameServers
+
+  # ------ BACKEND ------
+
+  # URL del endpoint del formulario
+  # Esta es la URL que debes usar en el frontend para hacer el POST
+  ApiEndpoint:
+    Description: "URL del endpoint del formulario de contacto"
+    Value: !GetAtt ApiGatewayStack.Outputs.ApiEndpoint
+
+  # Nombre de la tabla DynamoDB (referencia rapida)
+  DynamoDBTableName:
+    Description: "Nombre de la tabla DynamoDB"
+    Value: !GetAtt DynamoDBStack.Outputs.TableName
+
+  # Nombre del topic SNS (referencia rapida)
+  SNSTopicArn:
+    Description: "ARN del topic SNS de notificaciones"
+    Value: !GetAtt SNSStack.Outputs.TopicArn
+
+  # Nombre de la funcion Lambda (lo usa el pipeline CI/CD para actualizar el codigo)
+  LambdaFunctionName:
+    Description: "Nombre de la funcion Lambda"
+    Value: !GetAtt LambdaStack.Outputs.FunctionName
+
+  # URL del pipeline para monitoreo rapido desde la consola
+  PipelineUrl:
+    Description: "URL del pipeline CI/CD en la consola de AWS"
+    Value: !GetAtt CodePipelineStack.Outputs.PipelineUrl

@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo DynamoDB - Crea la tabla donde se almacenan los datos
+  enviados desde el formulario del sitio web.
+  Usa modo On-Demand (PAY_PER_REQUEST) ideal para proyectos personales
+  ya que no requiere provisionar capacidad y solo se paga por uso.
+
+# ==============================================================
+# PARAMETROS DEL MODULO
+# ==============================================================
+Parameters:
+
+  # Ambiente de despliegue (en este caso siempre prod)
+  Environment:
+    Type: String
+    Description: "Ambiente de despliegue"
+
+# ==============================================================
+# RECURSOS
+# ==============================================================
+Resources:
+
+  # ------------------------------------------------------------
+  # TABLA DYNAMODB - Almacena los datos del formulario
+  # ------------------------------------------------------------
+  FormDataTable:
+    Type: AWS::DynamoDB::Table
+    # DeletionPolicy Retain: Si el stack se elimina, la tabla y sus datos NO se borran
+    DeletionPolicy: Retain
+    Properties:
+
+      # Nombre de la tabla combinando proposito y ambiente
+      TableName: !Sub "website-form-data-${Environment}"
+
+      # ---- MODO DE FACTURACION ----
+      # PAY_PER_REQUEST: no se provisiona capacidad, se paga solo por las operaciones realizadas
+      # Ideal para cargas variables o proyectos personales con poco trafico
+      BillingMode: PAY_PER_REQUEST
+
+      # ---- DEFINICION DE ATRIBUTOS ----
+      # Solo se definen los atributos que forman parte de las claves (PK y SK)
+      # Los demas campos del formulario se agregan dinamicamente sin definirlos aqui
+      AttributeDefinitions:
+        - AttributeName: id            # Identificador unico de cada envio del formulario
+          AttributeType: S             # S = String
+        - AttributeName: timestamp     # Fecha y hora del envio (formato ISO 8601)
+          AttributeType: S             # S = String
+
+      # ---- ESQUEMA DE CLAVES ----
+      KeySchema:
+        - AttributeName: id            # Partition Key (PK): distribuye los datos en particiones
+          KeyType: HASH
+        - AttributeName: timestamp     # Sort Key (SK): permite ordenar registros del mismo id
+          KeyType: RANGE
+
+      # ---- POINT-IN-TIME RECOVERY (PITR) ----
+      # Permite restaurar la tabla a cualquier punto en los ultimos 35 dias
+      # Protege contra eliminaciones o modificaciones accidentales
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+      # ---- CIFRADO EN REPOSO ----
+      # Cifra todos los datos almacenados usando claves gestionadas por AWS (SSE)
+      SSESpecification:
+        SSEEnabled: true               # Activa el cifrado del lado del servidor
+
+      # ---- TAGS DE IDENTIFICACION ----
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Purpose
+          Value: FormDataStorage
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# ==============================================================
+# OUTPUTS DEL MODULO
+# Valores que necesita el modulo Lambda para conectarse a la tabla
+# ==============================================================
+Outputs:
+
+  # Nombre de la tabla (la Lambda lo necesita como variable de entorno)
+  TableName:
+    Description: "Nombre de la tabla DynamoDB"
+    Value: !Ref FormDataTable
+    Export:
+      Name: !Sub "${AWS::StackName}-TableName"
+
+  # ARN de la tabla (el rol IAM de Lambda necesita el ARN para dar permisos)
+  TableArn:
+    Description: "ARN de la tabla DynamoDB"
+    Value: !GetAtt FormDataTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-TableArn"
