@@ -117,9 +117,8 @@ AWS
                                                         └──────┬───────────┬─────────┘
                                                                │           │
                                               ┌────────────────▼──┐  ┌────▼──────────────┐
-                                              │     DynamoDB       │  │       SES          │
-                                              │  Guarda los leads  │  │  Email con formato │
-                                              │  Name/Email/Msg    │  │  HTML profesional  │
+                                              │     DynamoDB       │  │       SNS          │
+                                              │  Guarda los leads  │  │  Email   │
                                               │  + Timestamp       │  └───────────────────┘
                                               └───────────────────┘
                                                         │
