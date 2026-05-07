@@ -223,17 +223,19 @@ export const EDUCATIONS: Education[] = [
 
 /* ── Certificaciones ─────────────────────────────────────── */
 export const CERTIFICATIONS: Certification[] = [
-  { id: "c-01", name: "Shell Scripting en Linux",                      issuer: "LinkedIn Learning",   year: "2026" },
-  { id: "c-02", name: "Kubernetes",                                    issuer: "Platzi",              year: "2026" },
-  { id: "c-03", name: "Intoducción a DevOps",                          issuer: "Platzi",              year: "2026" },
-  { id: "c-04", name: "GitHub Actions",                                issuer: "Platzi",              year: "2026" },
-  { id: "c-05", name: "Fundamentos de AWS Cloud",                      issuer: "Platzi",              year: "2026" },
-  { id: "c-06", name: "Terraform",                                     issuer: "Platzi",              year: "2026" },
-  { id: "c-07", name: "Docker Avanzado",                               issuer: "Platzi",              year: "2026" },
-  { id: "c-08", name: "Docker Fundamentos",                            issuer: "Platzi",              year: "2026" },
-  { id: "c-09", name: "AWS Cloud Practitioner Essentials",             issuer: "AWS Skill Builder",   year: "2026" },
-  { id: "c-10", name: "Getting Started with DevOps on AWS",            issuer: "AWS Skill Builder",   year: "2026" },
-  { id: "c-11", name: "General English Course",                        issuer: "Oxford House College",   year: "2024" },
+  { id: "c-01", name: "Curso Completo de AWS DevOps",                                   issuer: "Udemy",                   year: "2026" },
+  { id: "c-02", name: "AWS Solutions Architect - Fundamentals of Architecting on AWS",  issuer: "AWS Skill Builder",       year: "2026" },
+  { id: "c-03", name: "Shell Scripting en Linux",                                       issuer: "LinkedIn Learning",       year: "2026" },
+  { id: "c-04", name: "Kubernetes",                                                     issuer: "Platzi",                  year: "2026" },
+  { id: "c-05", name: "Intoducción a DevOps",                                           issuer: "Platzi",                  year: "2026" },
+  { id: "c-06", name: "GitHub Actions",                                                 issuer: "Platzi",                  year: "2026" },
+  { id: "c-07", name: "Fundamentos de AWS Cloud",                                       issuer: "Platzi",                  year: "2026" },
+  { id: "c-08", name: "Terraform",                                                      issuer: "Platzi",                  year: "2026" },
+  { id: "c-09", name: "Docker Avanzado",                                                issuer: "Platzi",                  year: "2026" },
+  { id: "c-10", name: "Docker Fundamentos",                                             issuer: "Platzi",                  year: "2026" },
+  { id: "c-11", name: "AWS Cloud Practitioner Essentials",                              issuer: "AWS Skill Builder",       year: "2026" },
+  { id: "c-12", name: "Getting Started with DevOps on AWS",                             issuer: "AWS Skill Builder",       year: "2026" },
+  { id: "c-13", name: "General English Course",                                         issuer: "Oxford House College",    year: "2024" },
 ];
 
 /* ── Proyectos ───────────────────────────────────────────── */

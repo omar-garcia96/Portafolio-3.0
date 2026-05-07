@@ -15,7 +15,7 @@ const STATS = [
   { label: "Years Experience",  value: "3+",  color: "text-terminal-green"  },
   { label: "Cloud Platforms",   value: "1",   color: "text-terminal-cyan"   },
   { label: "Projects Deployed", value: "6+", color: "text-terminal-green"  },
-  { label: "Certifications",    value: "11",   color: "text-terminal-yellow" },
+  { label: "Certifications",    value: "13",   color: "text-terminal-yellow" },
 ];
 
 export default function About() {
@@ -49,7 +49,7 @@ export default function About() {
               <span className="text-terminal-green">&gt;</span> Soy{" "}
               <span className="text-terminal-green font-bold">Omar Garcia</span>,
               Ingeniero de Sistemas especializado en{" "}
-              <span className="text-terminal-cyan">Cloud Computing</span>y{" "}
+              <span className="text-terminal-cyan">Cloud Computing </span>y{" "}
               <span className="text-terminal-cyan">Automatización</span>.
             </p>
             <p>

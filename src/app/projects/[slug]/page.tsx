@@ -9,9 +9,10 @@ export async function generateStaticParams() {
 export async function generateMetadata({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }) {
-  const project = getProjectBySlug(params.slug);
+  const { slug } = await params;
+  const project = getProjectBySlug(slug);
   if (!project) return {};
   return {
     title: `${project.subtitle} | Omar Garcia`,
@@ -19,12 +20,13 @@ export async function generateMetadata({
   };
 }
 
-export default function ProjectPage({
+export default async function ProjectPage({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }) {
-  const project = getProjectBySlug(params.slug);
+  const { slug } = await params;
+  const project = getProjectBySlug(slug);
   if (!project) notFound();
 
   return (
@@ -40,7 +42,7 @@ export default function ProjectPage({
           <span>cd ..</span>
         </Link>
         <span className="text-[#00ff41]/40 text-xs hidden sm:block">
-          root@omargarcia:~/projects/{params.slug}$
+          root@omargarcia:~/projects/{slug}$
         </span>
         <span
           className={`text-xs px-2 py-0.5 border ${
