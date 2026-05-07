@@ -98,7 +98,7 @@ export default function JarvisActivator() {
       // Umbral — un aplauso genera un pico brusco de volumen.
       // 45 funciona bien en la mayoría de micrófonos y entornos.
       // Si detecta mal ajusta este valor: más alto = menos sensible
-      const THRESHOLD = 45;
+      const THRESHOLD = 93;
 
       if (avg > THRESHOLD && !cooldownRef.current) {
         cooldownRef.current = true;
@@ -131,18 +131,28 @@ export default function JarvisActivator() {
   };
 
   const activateJarvis = () => {
-    stopListening();
+    // Solo cancela el loop — NO cierra el stream ni el contexto
+    cancelAnimationFrame(frameRef.current);
     setState("activated");
 
-    // Reproduce el audio de JARVIS
     if (!audioRef.current) {
       audioRef.current = new Audio("/sounds/jarvis.mp3");
     }
     audioRef.current.currentTime = 0;
     audioRef.current.play().catch(() => {});
 
-    // Vuelve al estado idle después de 8 segundos
-    setTimeout(() => setState("idle"), 8000);
+    // Cuando termina el audio vuelve a escuchar con el mismo stream
+    audioRef.current.onended = () => {
+      clapCountRef.current = 0;
+      lastClapRef.current  = 0;
+      cooldownRef.current  = false;
+      setState("listening");
+      setTimeout(() => {
+        if (analyserRef.current) {
+          detectClaps(analyserRef.current);
+        }
+      }, 300);
+    };
   };
 
   return (
@@ -154,7 +164,7 @@ export default function JarvisActivator() {
           onClick={startListening}
           className="text-white/40 hover:text-white/70 text-[10px] font-mono tracking-wide transition-colors cursor-pointer text-right"
         >
-          // aplaude dos veces para activar a JARVIS
+          // click para activar a JARVIS
         </button>
       )}
 
