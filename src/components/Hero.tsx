@@ -14,6 +14,7 @@
 import { useEffect, useState } from "react";
 import TerminalText from "@/components/TerminalText";
 import { SITE } from "@/lib/data";
+import JarvisActivator from "@/components/JarvisActivator";
 
 /* Bloques de información que aparecen uno a uno después
    de que termina el efecto typing del nombre              */
@@ -45,6 +46,8 @@ export default function Hero() {
     >
       {/* Gradiente de fondo: oscurece el grid para dar profundidad */}
       <div className="absolute inset-0 bg-gradient-to-br from-terminal-bg via-terminal-bg/92 to-[#001a0f]/75 pointer-events-none" />
+
+      <JarvisActivator />
 
       {/* Orbe de brillo verde — efecto ambiental decorativo */}
       <div className="absolute top-1/3 right-1/4 w-96 h-96 rounded-full bg-terminal-green/5 blur-3xl pointer-events-none" />
@@ -168,6 +171,8 @@ export default function Hero() {
                 <span className="text-terminal-green">ls ./certs/</span>
               </p>
               <div className="text-terminal-muted pl-2 space-y-0.5">
+                <p><span className="text-terminal-cyan">-rw-r--r--</span> curso-completo-de-aws-devops.cert</p>
+                <p><span className="text-terminal-cyan">-rw-r--r--</span> fundamentals-of-architecting-on-aws.cert</p>
                 <p><span className="text-terminal-cyan">-rw-r--r--</span> scripting.cert</p>
                 <p><span className="text-terminal-cyan">-rw-r--r--</span> terraform.cert</p>
                 <p><span className="text-terminal-cyan">-rw-r--r--</span> docker.cert</p>

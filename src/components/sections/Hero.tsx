@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import TerminalText from "@/components/ui/TerminalText";
 import { SITE_META } from "@/lib/constants";
+import JarvisActivator from "@/components/JarvisActivator";
 
 const INFO_BLOCKS = [
   {
@@ -41,6 +42,8 @@ export default function Hero() {
     >
       {/* Background gradient vignette */}
       <div className="absolute inset-0 bg-gradient-to-br from-terminal-bg via-terminal-bg/90 to-[#001a0f]/80 pointer-events-none" />
+
+      <JarvisActivator />
 
       {/* Subtle green glow orb */}
       <div className="absolute top-1/3 right-1/4 w-96 h-96 rounded-full bg-terminal-green/5 blur-3xl pointer-events-none" />
@@ -163,6 +166,8 @@ export default function Hero() {
                 <span className="text-terminal-green">ls -la ./certs/</span>
               </div>
               <div className="text-terminal-muted pl-2 space-y-0.5">
+                <p><span className="text-terminal-cyan">drwxr-x</span> curso-completo-de-AWS-DevOps.cert</p>
+                <p><span className="text-terminal-cyan">drwxr-x</span> fundamentals-of-architecting-on-aws.cert</p>
                 <p><span className="text-terminal-cyan">drwxr-x</span> scripting.cert</p>
                 <p><span className="text-terminal-cyan">drwxr-x</span> terraform.cert</p>
                 <p><span className="text-terminal-cyan">drwxr-x</span> docker.cert</p>
