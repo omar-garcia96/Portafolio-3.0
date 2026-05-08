@@ -41,13 +41,19 @@ export default function JarvisActivator() {
     return () => stopListening();
   }, []);
 
-  const stopListening = () => {
-    cancelAnimationFrame(frameRef.current);
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    audioCtxRef.current?.close();
-    audioCtxRef.current = null;
-    analyserRef.current = null;
-  };
+  // Detiene solo el loop — mantiene stream y contexto activos
+    const stopListening = () => {
+        cancelAnimationFrame(frameRef.current);
+    };
+
+    // Cierra todo — solo al desmontar el componente
+    const stopAll = () => {
+        cancelAnimationFrame(frameRef.current);
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        audioCtxRef.current?.close();
+        audioCtxRef.current = null;
+        analyserRef.current = null;
+    };
 
   const startListening = async () => {
     // Si ya está activado o escuchando, no hace nada
@@ -143,20 +149,16 @@ export default function JarvisActivator() {
 
     // Cuando termina el audio vuelve a escuchar con el mismo stream
     audioRef.current.onended = () => {
-      clapCountRef.current = 0;
-      lastClapRef.current  = 0;
-      cooldownRef.current  = false;
-      setState("listening");
-      setTimeout(() => {
-        if (analyserRef.current) {
-          detectClaps(analyserRef.current);
-        }
-      }, 300);
+        clapCountRef.current = 0;
+        lastClapRef.current  = 0;
+        cooldownRef.current  = false;
+        cancelAnimationFrame(frameRef.current);
+        setState("idle");
     };
   };
 
   return (
-    <div className="absolute top-16 right-4 md:top-20 md:right-8 z-10 flex flex-col items-end gap-2">
+    <div className="hidden md:flex absolute top-20 right-8 z-10 flex-col items-end gap-2">
 
       {/* Texto hint — aparece después de 3 segundos */}
       {showHint && state === "idle" && (

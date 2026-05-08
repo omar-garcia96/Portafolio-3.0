@@ -241,7 +241,22 @@ export const CERTIFICATIONS: Certification[] = [
 /* ── Proyectos ───────────────────────────────────────────── */
 export const PROJECTS: Project[] = [
   {
-    id:          "proj-01",
+    id: "proj-01",
+    slug: "portfolio-aws-devops",
+    title: "Portfolio 3.0: Infraestructura 100% Serverless en AWS con AWS DevOps",
+    description: "Diseñé e implementé la infraestructura completa de mi portfolio usando exclusivamente servicios administrados de AWS. Arquitectura serverless con CloudFront, S3, API Gateway, Lambda, DynamoDB, SNS y pipeline CI/CD nativo con CodeBuild y CodePipeline.",
+   tech: ["AWS", "CloudFormation", "S3", "CloudFront", "API Gateway", "Lambda", "DynamoDB", "SNS", "CodeBuild", "CodePipeline", "Route53", "ACM"],
+   repoUrl: "https://github.com/omar-garcia96/Portafolio-3.0",
+   demoUrl: "https://omargarcia.xyz",
+    status: "active",
+   highlights: [
+      "Infraestructura 100% serverless — sin servidores que administrar",
+      "Pipeline CI/CD nativo AWS con CodeBuild + CodePipeline",
+      "Backend de contacto con API Gateway → Lambda → DynamoDB → SNS",
+   ],
+  },
+  {
+    id:          "proj-02",
     slug: "pipeline-cicd", 
     title:       "Pipeline CI/CD End-to-End: IaC con Terraform + AWS EC2 + Cloudflare Zero Trust",
     description: "Diseñé una arquitectura de infraestructura como código (IaC) y automatización CI/CD para el despliegue de contenedores Docker en AWS, enfocada en la seguridad 'Zero Trust' y la eliminación de accesos manuales tradicionales.",
@@ -249,7 +264,7 @@ export const PROJECTS: Project[] = [
             "Docker", "GitHub Actions", "Terraform", "Cloudflare", "CI/CD", "SSL/TLS", "Zero Trust"],
     repoUrl:     "https://github.com/omar-garcia96/Proyecto-CV-2.0.git",
     demoUrl:     "https://omargarcia.xyz",
-    status:      "active",
+    status:      "archived",
     highlights: [
       "Infraestructura 100% como código con Terraform",
       "Pipeline CI/CD completamente automatizado con GitHub Actions",
@@ -257,7 +272,7 @@ export const PROJECTS: Project[] = [
     ],
   },
   {
-    id:          "proj-02",
+    id:          "proj-03",
     slug: "aws-static-website",
     title:       "AWS Static Website Deployment (IaC + CI/CD)",
     description: "Diseñé una arquitectura serverless y altamente disponible en AWS para el despliegue de un sitio web estático, centrada en la automatización y la seguridad.",
@@ -270,5 +285,5 @@ export const PROJECTS: Project[] = [
       "Automatización completa del despliegue con GitHub Actions",
       "Implementación de SSL/TLS para seguridad y reducción de latencia global",
     ],
-  },
+  }
 ];

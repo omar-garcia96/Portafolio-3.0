@@ -88,8 +88,8 @@ export default function Skills() {
           <div className="flex flex-wrap gap-2">
             {[
               "Route53","CloudWatch","DynamoDB","RDS","ECS","EC2",
-              "VPC","SNS","SQS","Nginx","Linux","MySQL","Terraform",
-              "Git","Bash","Docker","Kubernetes", "SDKs","CI/CD", "Lambda","ECR","API Gateway"
+              "VPC","SNS","SQS","Nginx","Linux","MySQL","Terraform","CloudFormation", 
+              "Git","Bash","Docker","Kubernetes", "SDKs","CI/CD", "Lambda","ECR","API Gateway","CodePipeline","CodeBuild","CodeDeploy",
             ].map((tag) => (
               <span
                 key={tag}

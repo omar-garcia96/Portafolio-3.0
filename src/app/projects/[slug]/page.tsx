@@ -63,9 +63,11 @@ export default async function ProjectPage({
           {project.subtitle}
         </p>
 
-        {/* Título principal — verde brillante */}
+        {/* Título principal — verde brillante con cursor parpadeante */}
         <h1 className="text-xl md:text-2xl lg:text-3xl font-bold text-[#00ff41] leading-tight mb-4">
           {project.title}
+          {/* Cursor parpadeante — solo en el título del proyecto */}
+          <span className="animate-blink text-[#00ff41] ml-0.5">_</span>
         </h1>
 
         {/* Descripción — blanco suave */}
