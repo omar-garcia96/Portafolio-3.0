@@ -270,7 +270,7 @@ export default function Contact() {
 
               {/* Nota técnica del flujo serverless */}
               <p className="pt-2 text-terminal-muted/50 leading-relaxed">
-                // Flujo: formulario → API Gateway → Lambda → SNS → Email
+                // Flujo: formulario → API Gateway → Lambda → DynamoDB → SNS → Email
                 <br />
                 // Endpoint configurado en NEXT_PUBLIC_API_ENDPOINT
               </p>

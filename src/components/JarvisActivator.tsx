@@ -158,7 +158,7 @@ export default function JarvisActivator() {
   };
 
   return (
-    <div className="hidden md:flex absolute top-20 right-8 z-10 flex-col items-end gap-2">
+    <div className="flex absolute top-20 right-8 z-10 flex-col items-end gap-2">
 
       {/* Texto hint — aparece después de 3 segundos */}
       {showHint && state === "idle" && (

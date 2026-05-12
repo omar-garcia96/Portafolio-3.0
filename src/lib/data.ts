@@ -101,7 +101,7 @@ export const SITE = {
   description: "Construyendo soluciones eficientes, estables y seguras en entornos complejos.",
   email:       "omar@omargarcia.xyz",
   linkedin:    "https://www.linkedin.com/in/omar-alexis-garcia-galvis-6a187a330/",
-  github:      "https://github.com/omargarcia",
+  github:      "https://github.com/omar-garcia96",
   location:    "Colombia · Remote",
   // Datos de la barra de estado inferior
   ip:          "192.0.2.1",

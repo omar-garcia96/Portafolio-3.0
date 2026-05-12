@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getProjectBySlug, projects } from "@/data/projects";
+import InfrastructureDiagram from "@/components/InfrastructureDiagram";
 
 export async function generateStaticParams() {
   return projects.map((p) => ({ slug: p.slug }));
@@ -29,6 +30,11 @@ export default async function ProjectPage({
   const project = getProjectBySlug(slug);
   if (!project) notFound();
 
+  // Muestra el diagrama solo en proyectos que lo tengan definido.
+  // Agrega más slugs aquí si quieres diagrama en otros proyectos.
+  const supportedDiagrams = ["portfolio-aws-devops", "aws-static-website", "pipeline-cicd"];
+  const showDiagram = supportedDiagrams.includes(slug);
+
   return (
     <main className="min-h-screen bg-[#0a0a0a] text-white font-mono px-4 pt-24 pb-8 md:px-8 lg:px-16">
 
@@ -44,38 +50,28 @@ export default async function ProjectPage({
         <span className="text-[#00ff41]/40 text-xs hidden sm:block">
           root@omargarcia:~/projects/{slug}$
         </span>
-        <span
-          className={`text-xs px-2 py-0.5 border ${
-            project.status === "ACTIVE"
-              ? "border-[#00ff41] text-[#00ff41]"
-              : "border-white/40 text-white/40"
-          }`}
-        >
+        <span className={`text-xs px-2 py-0.5 border ${
+          project.status === "ACTIVE"
+            ? "border-[#00ff41] text-[#00ff41]"
+            : "border-white/40 text-white/40"
+        }`}>
           {project.status}
         </span>
       </div>
 
       {/* Header */}
       <header className="mb-10">
-        {/* Subtítulo — verde apagado */}
         <p className="text-[#00ff41]/50 text-sm mb-1">
           <span className="text-[#00ff41]/30">// </span>
           {project.subtitle}
         </p>
-
-        {/* Título principal — verde brillante con cursor parpadeante */}
         <h1 className="text-xl md:text-2xl lg:text-3xl font-bold text-[#00ff41] leading-tight mb-4">
           {project.title}
-          {/* Cursor parpadeante — solo en el título del proyecto */}
           <span className="animate-blink text-[#00ff41] ml-0.5">_</span>
         </h1>
-
-        {/* Descripción — blanco suave */}
         <p className="text-white/70 text-sm leading-relaxed max-w-3xl">
           {project.description}
         </p>
-
-        {/* Highlights — ✓ verde, texto blanco */}
         <ul className="mt-4 space-y-1">
           {project.highlights.map((h, i) => (
             <li key={i} className="text-sm text-white/80 flex items-start gap-2">
@@ -84,8 +80,6 @@ export default async function ProjectPage({
             </li>
           ))}
         </ul>
-
-        {/* Tags */}
         <div className="mt-5 flex flex-wrap gap-2">
           {project.tags.map((tag) => (
             <span
@@ -96,26 +90,16 @@ export default async function ProjectPage({
             </span>
           ))}
         </div>
-
-        {/* Action buttons */}
         <div className="mt-6 flex gap-4">
           {project.repoUrl && (
-            <a
-              href={project.repoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-white/60 hover:text-[#00ff41] transition-colors flex items-center gap-1"
-            >
+            <a href={project.repoUrl} target="_blank" rel="noopener noreferrer"
+              className="text-sm text-white/60 hover:text-[#00ff41] transition-colors flex items-center gap-1">
               <span className="text-[#00ff41]/40">{">"}</span> ./view_repo
             </a>
           )}
           {project.demoUrl && (
-            <a
-              href={project.demoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-white/60 hover:text-[#00ff41] transition-colors flex items-center gap-1"
-            >
+            <a href={project.demoUrl} target="_blank" rel="noopener noreferrer"
+              className="text-sm text-white/60 hover:text-[#00ff41] transition-colors flex items-center gap-1">
               <span className="text-[#00ff41]/40">{">"}</span> ./open_demo
             </a>
           )}
@@ -128,53 +112,59 @@ export default async function ProjectPage({
         <div className="flex-1 border-t border-[#00ff41]/20" />
       </div>
 
-      {/* Documentation sections */}
-      <div className="space-y-10 max-w-4xl">
-        {project.sections.map((section, i) => (
-          <section key={i} className="group">
+      {/* Layout: secciones izquierda + diagrama sticky derecha */}
+      <div className={showDiagram
+        ? "grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-10 items-start"
+        : ""
+      }>
 
-            {/* Título de sección — verde */}
-            <div className="flex items-center gap-3 mb-4">
-              <h2 className="text-[#00ff41] font-bold text-base md:text-lg shrink-0">
-                {section.title}
-              </h2>
-              <div className="flex-1 border-t border-[#00ff41]/15 group-hover:border-[#00ff41]/30 transition-colors" />
-            </div>
-
-            {/* Contenido de sección — blanco */}
-            {section.content && (
-              <div className="text-white/70 text-sm leading-relaxed whitespace-pre-line pl-4 border-l border-[#00ff41]/20 mb-4">
-                {section.content}
+        {/* Secciones de documentación */}
+        <div className="space-y-10">
+          {project.sections.map((section, i) => (
+            <section key={i} className="group">
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-[#00ff41] font-bold text-base md:text-lg shrink-0">
+                  {section.title}
+                </h2>
+                <div className="flex-1 border-t border-[#00ff41]/15 group-hover:border-[#00ff41]/30 transition-colors" />
               </div>
-            )}
 
-            {/* Subsecciones */}
-            {section.subsections && (
-              <div className="pl-4 space-y-4 mt-4">
-                {section.subsections.map((sub, j) => (
-                  <div key={j} className="border-l border-[#00ff41]/20 pl-4">
-                    {/* Subtítulo — verde */}
-                    <h3 className="text-[#00ff41] text-sm font-bold mb-2 flex items-center gap-2">
-                      <span className="text-[#00ff41]/40">{"///"}</span>
-                      {sub.title}
-                    </h3>
-                    {/* Contenido subsección — blanco */}
-                    <p className="text-white/65 text-sm leading-relaxed whitespace-pre-line">
-                      {sub.content}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        ))}
+              {section.content && (
+                <div className="text-white/70 text-sm leading-relaxed whitespace-pre-line pl-4 border-l border-[#00ff41]/20 mb-4">
+                  {section.content}
+                </div>
+              )}
+
+              {section.subsections && (
+                <div className="pl-4 space-y-4 mt-4">
+                  {section.subsections.map((sub, j) => (
+                    <div key={j} className="border-l border-[#00ff41]/20 pl-4">
+                      <h3 className="text-[#00ff41] text-sm font-bold mb-2 flex items-center gap-2">
+                        <span className="text-[#00ff41]/40">{"///"}</span>
+                        {sub.title}
+                      </h3>
+                      <p className="text-white/65 text-sm leading-relaxed whitespace-pre-line">
+                        {sub.content}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          ))}
+        </div>
+
+        {/* Diagrama sticky — solo desktop y solo si showDiagram */}
+        {showDiagram && (
+          <div className="hidden lg:block">
+            <InfrastructureDiagram slug={slug} />
+          </div>
+        )}
       </div>
 
       {/* Footer */}
       <footer className="mt-16 pt-6 border-t border-[#00ff41]/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <span className="text-white/30 text-xs">
-          Omar Garcia · omargarcia.xyz
-        </span>
+        <span className="text-white/30 text-xs">Omar Garcia · omargarcia.xyz</span>
         <Link
           href="/"
           className="text-white/50 hover:text-[#00ff41] transition-colors text-sm flex items-center gap-2 group"
