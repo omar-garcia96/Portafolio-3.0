@@ -21,7 +21,7 @@ set -e  # Detiene el script si cualquier comando falla
 # --------------------------------------------------------------
 STACK_NAME="portfolio-prod"
 REGION="us-east-1"
-TEMPLATES_BUCKET="portafolio-3.0"          # Tu bucket para los templates
+TEMPLATES_BUCKET="portafolio-3.0"          # bucket para los templates
 PARAMETERS_FILE="parameters/prod-params.json"
 MASTER_TEMPLATE="main.yaml"
 MODULES_DIR="modules"

@@ -41,7 +41,7 @@ export default async function ProjectPage({
       {/* Top bar */}
       <div className="mb-8 flex items-center justify-between border-b border-[#00ff41]/20 pb-4">
         <Link
-          href="/"
+          href="/#portfolio"
           className="text-[#00ff41]/60 hover:text-[#00ff41] transition-colors text-sm flex items-center gap-2 group"
         >
           <span className="group-hover:-translate-x-1 transition-transform inline-block">{"<"}</span>
@@ -166,7 +166,7 @@ export default async function ProjectPage({
       <footer className="mt-16 pt-6 border-t border-[#00ff41]/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <span className="text-white/30 text-xs">Omar Garcia · omargarcia.xyz</span>
         <Link
-          href="/"
+          href="/#portfolio"
           className="text-white/50 hover:text-[#00ff41] transition-colors text-sm flex items-center gap-2 group"
         >
           <span className="group-hover:-translate-x-1 transition-transform inline-block">{"<"}</span>
